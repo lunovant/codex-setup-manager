@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-setup-manager"
-version = "0.1.0"
+version = "0.1.1"
 description = "Configure OpenAI Codex (CLI and Desktop) to use a third-party OpenAI-compatible provider such as Lunovant."
 readme = "README.md"
 license = "MIT"
