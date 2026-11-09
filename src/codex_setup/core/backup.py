@@ -18,7 +18,7 @@ from codex_setup.core.config_store import (
     validate_text,
 )
 from codex_setup.core.errors import CodexSetupError, ConfigParseError
-from codex_setup.core.state import AppState
+from codex_setup.core.state import ConfigOwnership
 
 
 @dataclass
@@ -122,13 +122,13 @@ def restore_backup(
 
 
 def ensure_original_snapshot(
-    path: Path, state: AppState, env: Mapping[str, str] | None = None
+    path: Path, own: ConfigOwnership, env: Mapping[str, str] | None = None
 ) -> bool:
-    if state.original_snapshot is not None:
+    if own.original_snapshot is not None:
         return False
     path = Path(path)
     if not path.exists():
-        state.original_snapshot = ""
+        own.original_snapshot = ""
         return True
-    state.original_snapshot = str(create_backup(path, "original", env))
+    own.original_snapshot = str(create_backup(path, "original", env))
     return True

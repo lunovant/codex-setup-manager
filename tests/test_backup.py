@@ -7,7 +7,7 @@ import pytest
 
 from codex_setup.core import backup, paths
 from codex_setup.core.errors import CodexSetupError, ConfigParseError
-from codex_setup.core.state import AppState
+from codex_setup.core.state import ConfigOwnership
 
 
 def _cfg(isolated_env, text: str = 'model = "a"\n') -> Path:
@@ -70,7 +70,7 @@ def test_restore_invalid_backup_rejected(isolated_env) -> None:
 
 def test_original_snapshot_once(isolated_env) -> None:
     cfg = _cfg(isolated_env)
-    state = AppState()
+    state = ConfigOwnership()
     assert backup.ensure_original_snapshot(cfg, state, isolated_env) is True
     assert state.original_snapshot and Path(state.original_snapshot).exists()
     assert backup.ensure_original_snapshot(cfg, state, isolated_env) is False
@@ -79,7 +79,7 @@ def test_original_snapshot_once(isolated_env) -> None:
 
 
 def test_original_snapshot_missing_file(isolated_env) -> None:
-    state = AppState()
+    state = ConfigOwnership()
     missing = paths.config_path(isolated_env)
     assert backup.ensure_original_snapshot(missing, state, isolated_env) is True
     assert state.original_snapshot == ""

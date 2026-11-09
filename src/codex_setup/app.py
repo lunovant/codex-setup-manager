@@ -7,6 +7,7 @@ the launcher and the opt-in persistent env helpers.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -26,7 +27,14 @@ from codex_setup.core.errors import (
     SecretStoreError,
     ValidationError,
 )
-from codex_setup.core.state import AppState, Profile, load_state, save_state
+from codex_setup.core.state import (
+    AppState,
+    ConfigOwnership,
+    Profile,
+    config_key,
+    load_state,
+    save_state,
+)
 from codex_setup.diagnostics import knowledge
 from codex_setup.diagnostics.api_test import ApiTestReport, run_api_test
 from codex_setup.diagnostics.checks import CheckResult, DiagnosticsContext, run_checks
@@ -146,34 +154,102 @@ class SetupService:
         return load_state(self._env)
 
     def secret_store(self, backend: str | None = None) -> SecretStore:
+        """One SecretStore per resolved backend for the service lifetime.
+
+        ``None`` uses the backend recorded in state (or "auto"), so a session key entered
+        in Quick Setup is visible to Test/Launch in the same run.
+        """
         if self._injected_store is not None:
             return self._injected_store
         if backend is None:
-            backend = "file" if self.load_state().secret_backend == "file" else "auto"
+            backend = self.load_state().secret_backend or "auto"
         if backend not in self._stores:
-            self._stores[backend] = make_secret_store(backend, self._env)
+            store = make_secret_store(backend, self._env)
+            store = self._stores.setdefault(store.backend_name, store)
+            self._stores[backend] = store
         return self._stores[backend]
 
+    def _store_call(self, fn: Callable[..., Any], *args: Any) -> Any:
+        try:
+            return fn(*args)
+        except CodexSetupError:
+            raise
+        except Exception as exc:  # backend specific errors (keyring etc.)
+            raise SecretStoreError(f"Secret store failed: {exc.__class__.__name__}") from exc
+
+    # -- ownership ---------------------------------------------------------
+    def _own(self, state: AppState) -> ConfigOwnership:
+        return state.configs.setdefault(config_key(self.config_path), ConfigOwnership())
+
+    def ownership(self, state: AppState | None = None) -> ConfigOwnership:
+        """Read-only view of what this tool owns in the CURRENT config.toml."""
+        state = state or load_state(self._env)
+        return state.configs.get(config_key(self.config_path)) or ConfigOwnership()
+
+    @staticmethod
+    def _prune(state: AppState) -> None:
+        for k in [k for k, v in state.configs.items() if v.is_empty()]:
+            del state.configs[k]
+
+    @staticmethod
+    def _note_credential(own: ConfigOwnership, backend: str, env_key: str) -> None:
+        keys = own.credentials.setdefault(backend, [])
+        if env_key not in keys:
+            keys.append(env_key)
+
+    def _upsert(self, doc: Any, spec: ProviderSpec, own: ConfigOwnership) -> None:
+        """Write a provider table, recording ownership / the values we overwrite (once)."""
+        before = codex_config.provider_fields(doc, spec.id)
+        codex_config.upsert_provider(doc, spec)
+        if before is None:
+            if spec.id not in own.managed_provider_ids:
+                own.managed_provider_ids.append(spec.id)
+        elif spec.id not in own.managed_provider_ids:
+            own.overwritten.setdefault(spec.id, before)
+            own.written[spec.id] = {
+                "name": spec.name,
+                "base_url": spec.base_url,
+                "env_key": str(spec.env_key),
+                "wire_api": spec.wire_api,
+            }
+
     # -- helpers -----------------------------------------------------------
-    def _record_original(self, state: AppState, doc: Any) -> None:
-        if state.original_top_level is None:
+    def _record_original(self, own: ConfigOwnership, doc: Any) -> None:
+        if own.original_top_level is None:
             st = codex_config.get_status(doc)
-            state.original_top_level = {"model": st.model, "model_provider": st.model_provider}
+            own.original_top_level = {"model": st.model, "model_provider": st.model_provider}
 
     def _edit(
         self,
-        mutate: Callable[[Any, AppState], None],
+        mutate: Callable[[Any, AppState, ConfigOwnership], None],
         reason: str,
         dry_run: bool,
+        *,
+        before_write: Callable[[], None] | None = None,
+        state_first: bool = True,
     ) -> SaveResult:
+        """load -> mutate -> [save state] -> [before_write] -> write config (last).
+
+        Ownership/originals are persisted before side effects so a failure later leaves
+        state consistent (recorded originals are never overwritten by later runs).
+        ``state_first=False`` (uninstall) saves state only after the config was written.
+        """
         state = load_state(self._env)
         loaded = load_config(self.config_path)
+        own = self._own(state)
         if not dry_run:
-            backup_mod.ensure_original_snapshot(self.config_path, state, self._env)
-        self._record_original(state, loaded.doc)
-        mutate(loaded.doc, state)
-        result = save_config(loaded, dry_run=dry_run, reason=reason, env=self._env)
-        if not dry_run:
+            backup_mod.ensure_original_snapshot(self.config_path, own, self._env)
+        self._record_original(own, loaded.doc)
+        mutate(loaded.doc, state, own)
+        if dry_run:
+            return save_config(loaded, dry_run=True, reason=reason, env=self._env)
+        self._prune(state)
+        if state_first:
+            save_state(state, self._env)
+        if before_write is not None:
+            before_write()
+        result = save_config(loaded, dry_run=False, reason=reason, env=self._env)
+        if not state_first:
             save_state(state, self._env)
         return result
 
@@ -190,10 +266,16 @@ class SetupService:
         return _Active(st.model_provider, env_key, base_url, st.model, table)
 
     def get_key(self, env_key: str) -> str | None:
+        stored = None
         try:
             stored = self.secret_store().get(env_key)
         except SecretStoreError:
             stored = None
+        if not stored and "session" in self._stores:
+            try:
+                stored = self._stores["session"].get(env_key)
+            except SecretStoreError:
+                stored = None
         return stored or self.env.get(env_key) or None
 
     # -- status ------------------------------------------------------------
@@ -255,14 +337,11 @@ class SetupService:
             if url != LUNOVANT.base_url:
                 spec = replace(LUNOVANT, base_url=url)
         store = self.secret_store(secret_backend)
+        env_key = spec.env_key or LUNOVANT.env_key or ""
 
-        def mutate(doc: Any, state: AppState) -> None:
-            before = codex_config.get_status(doc)
-            existed = spec.id in before.provider_ids
-            codex_config.upsert_provider(doc, spec)
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            self._upsert(doc, spec, own)
             codex_config.set_active(doc, spec.id, model)
-            if not existed and spec.id not in state.managed_provider_ids:
-                state.managed_provider_ids.append(spec.id)
             prev = state.profiles.get(spec.id)
             custom = list(prev.models) if prev else []
             if model not in LUNOVANT_MODELS and model not in custom:
@@ -270,16 +349,19 @@ class SetupService:
             state.profiles[spec.id] = Profile(spec.id, spec, model, custom)
             state.active_profile = spec.id
             state.secret_backend = store.backend_name
+            if key:
+                self._note_credential(own, store.backend_name, env_key)
 
-        result = self._edit(mutate, "quick setup", dry_run)
-        if key and not dry_run:
-            store.set(spec.env_key or LUNOVANT.env_key or "", key)
-        return result
+        def before_write() -> None:
+            if key:
+                self._store_call(store.set, env_key, key)
+
+        return self._edit(mutate, "quick setup", dry_run, before_write=before_write)
 
     def change_model(self, model: str, dry_run: bool = False) -> SaveResult:
         model = validate_model_name(model)
 
-        def mutate(doc: Any, state: AppState) -> None:
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
             codex_config.set_model(doc, model)
             prof = state.profiles.get(state.active_profile or "")
             if prof is not None:
@@ -297,39 +379,55 @@ class SetupService:
         key = clean_key(api_key)
         if key and delete_key:
             raise ValidationError("Choose either a new key or --delete-key, not both")
-        result = SaveResult(False, "", None, dry_run)
-        if base_url is not None:
-            url = normalize_base_url(base_url)
-
-            def mutate(doc: Any, state: AppState) -> None:
-                st = codex_config.get_status(doc)
-                pid, table = st.model_provider, st.active_provider
-                if not pid or pid in codex_config.RESERVED_PROVIDER_IDS or not table:
-                    raise CodexSetupError("No custom provider is active. Run `codex-setup setup`.")
-                env_key = table.get("env_key")
-                if not env_key:
-                    raise CodexSetupError(f"[model_providers.{pid}] has no env_key")
-                spec = ProviderSpec(
-                    pid, str(table.get("name", pid)), url, str(env_key),
-                    str(table.get("wire_api", "responses")),
-                )
-                codex_config.upsert_provider(doc, spec)
-                prof = state.profiles.get(pid)
-                if prof is not None:
-                    prof.provider = replace(prof.provider, base_url=url)
-
-            result = self._edit(mutate, "change api url", dry_run)
-        if (key or delete_key) and not dry_run:
+        if base_url is None:
+            result = SaveResult(False, "", None, dry_run)
+            if not (key or delete_key):
+                return result
             env_key = self._require_env_key()
+            if dry_run:
+                return result
             store = self.secret_store()
             if key:
-                store.set(env_key, key)
                 state = load_state(self._env)
+                self._note_credential(self._own(state), store.backend_name, env_key)
                 state.secret_backend = store.backend_name
-                save_state(state, self._env)
+                save_state(state, self._env)  # state first, then the secret
+                self._store_call(store.set, env_key, key)
             else:
-                store.delete(env_key)
-        return result
+                self._store_call(store.delete, env_key)
+            return result
+
+        url = normalize_base_url(base_url)
+        holder: dict[str, str] = {}
+
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            st = codex_config.get_status(doc)
+            pid, table = st.model_provider, st.active_provider
+            if not pid or pid in codex_config.RESERVED_PROVIDER_IDS or not table:
+                raise CodexSetupError("No custom provider is active. Run `codex-setup setup`.")
+            env_key = table.get("env_key")
+            if not env_key:
+                raise CodexSetupError(f"[model_providers.{pid}] has no env_key")
+            spec = ProviderSpec(
+                pid, str(table.get("name", pid)), url, str(env_key),
+                str(table.get("wire_api", "responses")),
+            )
+            self._upsert(doc, spec, own)
+            holder["env_key"] = str(env_key)
+            prof = state.profiles.get(pid)
+            if prof is not None:
+                prof.provider = replace(prof.provider, base_url=url)
+            if key:
+                self._note_credential(own, self.secret_store().backend_name, str(env_key))
+                state.secret_backend = self.secret_store().backend_name
+
+        def before_write() -> None:
+            if key:
+                self._store_call(self.secret_store().set, holder["env_key"], key)
+            elif delete_key:
+                self._store_call(self.secret_store().delete, holder["env_key"])
+
+        return self._edit(mutate, "change api url", dry_run, before_write=before_write)
 
     def _require_env_key(self) -> str:
         active = self._active()
@@ -368,8 +466,8 @@ class SetupService:
             raise ValidationError(f"Unsupported sandbox mode: {mode!r}")
         new = None if mode in (None, "remove") else mode
 
-        def mutate(doc: Any, state: AppState) -> None:
-            orig = state.original_top_level
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            orig = own.original_top_level
             if orig is not None and "windows_sandbox" not in orig:
                 orig["windows_sandbox"] = codex_config.get_status(doc).windows_sandbox
             codex_config.set_windows_sandbox(doc, new)  # type: ignore[arg-type]
@@ -377,9 +475,11 @@ class SetupService:
         return self._edit(mutate, f"windows sandbox {mode or 'remove'}", dry_run)
 
     # -- backups -----------------------------------------------------------
-    def backup_create(self) -> Path:
+    def backup_create(self, dry_run: bool = False) -> Path | None:
         if not self.config_path.exists():
             raise CodexSetupError("config.toml does not exist yet; nothing to back up.")
+        if dry_run:
+            return None
         return backup_mod.create_backup(self.config_path, "manual", self._env)
 
     def backup_list(self) -> list[BackupInfo]:
@@ -390,7 +490,7 @@ class SetupService:
         return backup_mod.restore_backup(info, self.config_path, dry_run=dry_run, env=self._env)
 
     def backup_original(self, dry_run: bool = False) -> SaveResult:
-        snap = load_state(self._env).original_snapshot
+        snap = self.ownership().original_snapshot
         if not snap:
             raise CodexSetupError("There is no original backup file (none was needed or taken).")
         return self.backup_restore(snap, dry_run)
@@ -420,6 +520,7 @@ class SetupService:
         env_key: str | None = None,
         model: str = DEFAULT_MODEL,
         models: list[str] | None = None,
+        dry_run: bool = False,
     ) -> Profile:
         model = validate_model_name(model)
         extra = [validate_model_name(m) for m in (models or [])]
@@ -431,6 +532,8 @@ class SetupService:
             spec = custom_provider(name, name, base_url, env_key)
         state = load_state(self._env)
         profile = Profile(name, spec, model, extra)
+        if dry_run:
+            return profile
         state.profiles[name] = profile
         save_state(state, self._env)
         return profile
@@ -442,23 +545,22 @@ class SetupService:
             raise CodexSetupError(f"Profile not found: {name}")
         spec = profile.provider
 
-        def mutate(doc: Any, state: AppState) -> None:
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
             if not spec.builtin:
-                existed = spec.id in codex_config.get_status(doc).provider_ids
-                codex_config.upsert_provider(doc, spec)
-                if not existed and spec.id not in state.managed_provider_ids:
-                    state.managed_provider_ids.append(spec.id)
+                self._upsert(doc, spec, own)
             codex_config.set_active(doc, spec.id, profile.model)
             state.active_profile = name
 
         return self._edit(mutate, f"use profile {name}", dry_run)
 
-    def remove_profile(self, name: str) -> None:
+    def remove_profile(self, name: str, dry_run: bool = False) -> None:
         state = load_state(self._env)
         if name not in state.profiles:
             raise CodexSetupError(f"Profile not found: {name}")
         if state.active_profile == name:
             raise CodexSetupError("Cannot remove the active profile; switch to another first.")
+        if dry_run:
+            return
         del state.profiles[name]
         save_state(state, self._env)
 
@@ -483,28 +585,34 @@ class SetupService:
         prof = state.profiles.get(state.active_profile or "")
         return list(prof.models) if prof else []
 
-    def add_custom_model(self, name: str) -> None:
+    def add_custom_model(self, name: str, dry_run: bool = False) -> None:
         name = validate_model_name(name)
         state = load_state(self._env)
         prof = self._active_profile(state)
+        if dry_run:
+            return
         if name not in prof.models:
             prof.models.append(name)
         save_state(state, self._env)
 
-    def edit_custom_model(self, old: str, new: str) -> None:
+    def edit_custom_model(self, old: str, new: str, dry_run: bool = False) -> None:
         new = validate_model_name(new)
         state = load_state(self._env)
         prof = self._active_profile(state)
         if old not in prof.models:
             raise CodexSetupError(f"Custom model not found: {old}")
+        if dry_run:
+            return
         prof.models[prof.models.index(old)] = new
         save_state(state, self._env)
 
-    def remove_custom_model(self, name: str) -> None:
+    def remove_custom_model(self, name: str, dry_run: bool = False) -> None:
         state = load_state(self._env)
         prof = self._active_profile(state)
         if name not in prof.models:
             raise CodexSetupError(f"Custom model not found: {name}")
+        if dry_run:
+            return
         prof.models.remove(name)
         save_state(state, self._env)
 
@@ -531,41 +639,124 @@ class SetupService:
         home = Path(self.env.get("HOME") or Path.home())
         return shellrc.choose_rc(self.env.get("SHELL"), home)
 
-    def env_install(self, consent: bool) -> str:
-        """Persist the key as a user env var / shell rc block. Returns where it was written."""
+    @staticmethod
+    def _sha(text: str | None) -> str | None:
+        return None if text is None else hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def env_install(self, consent: bool, dry_run: bool = False) -> str:
+        """Persist the key as a user env var / shell rc block. Returns where it was written.
+
+        Records what was there before (registry value/type, or the previous rc block) so
+        ``env_remove`` restores only what this tool changed.
+        """
         if not consent:
             raise CodexSetupError("Persistent environment install needs explicit consent.")
         env_key = self._require_env_key()
         key = self.get_key(env_key)
         if not key:
             raise CodexSetupError(f"No API key found for {env_key}.")
-        if self.platform.system == "windows":
+        windows_target = self.platform.system == "windows"
+        where = "HKCU\\Environment" if windows_target else str(self._rc_path())
+        if dry_run:
+            return where
+        state = load_state(self._env)
+        own = self._own(state)
+        old = own.env_installs.get(env_key)
+        if windows_target:
+            prev = windows.get_user_env_typed(env_key)
+            record = {
+                "kind": "windows",
+                "existed": prev is not None,
+                "prev_value": prev[0] if prev else None,
+                "prev_type": prev[1] if prev else None,
+                "written_sha": self._sha(key),
+            }
+        else:
+            rc = self._rc_path()
+            prev_block = shellrc.read_block(rc)
+            record = {
+                "kind": "rc",
+                "rc": str(rc),
+                "prev_block": prev_block,
+                "written_sha": self._sha(shellrc.block_text(env_key, key)),
+            }
+        if old is not None and old.get("kind") == record["kind"]:
+            # keep the FIRST recorded original; only refresh what we wrote
+            old["written_sha"] = record["written_sha"]
+            old["rc"] = record.get("rc", old.get("rc"))
+            record = old
+        own.env_installs[env_key] = record
+        save_state(state, self._env)  # state first
+        if windows_target:
             windows.set_user_env(env_key, key)
-            return "HKCU\\Environment"
-        rc = self._rc_path()
-        shellrc.install_block(rc, env_key, key)
-        return str(rc)
+        else:
+            shellrc.install_block(Path(record["rc"]), env_key, key)
+        return where
 
-    def env_remove(self) -> bool:
+    def env_remove(self, dry_run: bool = False) -> str:
+        """Undo ``env_install``. Returns removed | restored | nothing | not_owned | changed."""
         env_key = self._require_env_key()
-        if self.platform.system == "windows":
-            return windows.remove_user_env(env_key)
-        return shellrc.remove_block(self._rc_path(), env_key)
+        state = load_state(self._env)
+        own = self._own(state)
+        rec = own.env_installs.get(env_key)
+        windows_target = self.platform.system == "windows"
+        if rec is None or rec.get("kind") != ("windows" if windows_target else "rc"):
+            return "not_owned"
+        if windows_target:
+            current = windows.get_user_env_typed(env_key)
+            if current is None:
+                outcome = "nothing"
+            elif self._sha(current[0]) != rec.get("written_sha"):
+                return "changed"
+            elif rec.get("existed"):
+                outcome = "restored"
+            else:
+                outcome = "removed"
+            if dry_run:
+                return outcome
+            if outcome == "restored":
+                windows.set_user_env(env_key, str(rec["prev_value"]), rec.get("prev_type"))
+            elif outcome == "removed":
+                windows.remove_user_env(env_key)
+        else:
+            rc = Path(str(rec["rc"]))
+            current_block = shellrc.read_block(rc)
+            if current_block is None:
+                outcome = "nothing"
+            elif self._sha(current_block) != rec.get("written_sha"):
+                return "changed"
+            else:
+                outcome = "restored" if rec.get("prev_block") else "removed"
+            if dry_run:
+                return outcome
+            if outcome in ("restored", "removed"):
+                shellrc.write_block_text(rc, rec.get("prev_block"))
+        del own.env_installs[env_key]
+        self._prune(state)
+        save_state(state, self._env)
+        return outcome
 
     # -- uninstall ---------------------------------------------------------
     def uninstall(self, dry_run: bool = False, delete_secret: bool = False) -> SaveResult:
         state0 = load_state(self._env)
+        own0 = self.ownership(state0)
+        if own0.is_empty() and not self.config_path.exists():
+            return SaveResult(False, "", None, dry_run)
+        notes: list[tuple[str, dict[str, str]]] = []
         env_keys: list[str] = []
 
-        def mutate(doc: Any, state: AppState) -> None:
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
             st = codex_config.get_status(doc)
-            for pid in list(state.managed_provider_ids):
-                prof = state.profiles.get(pid)
-                if prof is not None and prof.provider.env_key:
-                    env_keys.append(prof.provider.env_key)
+            for pid in list(own.managed_provider_ids):
                 if pid in st.provider_ids:
                     codex_config.remove_provider(doc, pid)
-            orig = state.original_top_level
+            for pid, previous in own.overwritten.items():
+                skipped = codex_config.restore_provider_fields(
+                    doc, pid, previous, own.written.get(pid, {})
+                )
+                for name in skipped:
+                    notes.append(("un_field_changed", {"provider": pid, "field": name}))
+            orig = own.original_top_level
             if orig is not None:
                 codex_config.restore_top_level(doc, orig.get("model"), orig.get("model_provider"))
                 if "windows_sandbox" in orig:
@@ -578,23 +769,52 @@ class SetupService:
                             windows_tbl = tomlkit.table()
                             doc.add("windows", windows_tbl)
                         windows_tbl["sandbox"] = value
-            state.managed_provider_ids = []
+            own.managed_provider_ids = []
+            own.original_top_level = None
+            own.original_snapshot = None
+            own.overwritten = {}
+            own.written = {}
             state.active_profile = None
-            state.original_top_level = None
-            state.original_snapshot = None
+            for ks in own.credentials.values():
+                env_keys.extend(ks)
 
-        if (
-            not state0.managed_provider_ids
-            and state0.original_top_level is None
-            and not self.config_path.exists()
-        ):
-            return SaveResult(False, "", None, dry_run)
-        result = self._edit(mutate, "uninstall", dry_run)
-        if delete_secret and not dry_run:
-            store = self.secret_store()
-            for env_key in dict.fromkeys(env_keys):
-                store.delete(env_key)
+        result = self._edit(mutate, "uninstall", dry_run, state_first=False)
+        result.notes = notes
+        keys = list(dict.fromkeys(env_keys))
+        if delete_secret and keys:
+            if dry_run:
+                result.notes.append(("un_would_delete", {"keys": ", ".join(keys)}))
+            else:
+                result.notes.extend(self._delete_credentials(keys))
         return result
+
+    def _delete_credentials(self, keys: list[str]) -> list[tuple[str, dict[str, str]]]:
+        state = load_state(self._env)
+        own = self._own(state)
+        by_backend = {b: list(ks) for b, ks in own.credentials.items()}
+        deleted: list[str] = []
+        notes: list[tuple[str, dict[str, str]]] = []
+        for backend, ks in by_backend.items():
+            try:
+                store = self.secret_store(backend)
+            except CodexSetupError as exc:
+                notes.append(("un_key_failed", {"keys": ", ".join(ks), "error": str(exc)}))
+                continue
+            for k in ks:
+                try:
+                    self._store_call(store.delete, k)
+                    deleted.append(k)
+                    if k in own.credentials.get(backend, []):
+                        own.credentials[backend].remove(k)
+                except CodexSetupError as exc:
+                    notes.append(("un_key_failed", {"keys": k, "error": str(exc)}))
+            if backend in own.credentials and not own.credentials[backend]:
+                del own.credentials[backend]
+        self._prune(state)
+        save_state(state, self._env)
+        if deleted:
+            notes.append(("un_keys_deleted", {"keys": ", ".join(dict.fromkeys(deleted))}))
+        return notes
 
 
 __all__ = [

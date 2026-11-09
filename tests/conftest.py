@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+_HOME_VARS = ("HOME", "USERPROFILE", "CODEX_HOME", "CODEX_SETUP_HOME", "APPDATA", "XDG_CONFIG_HOME")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Session-wide safety net: even if a test undoes its monkeypatch, nothing
+    resolves to the developer's real home, Codex config or app data."""
+    base = Path(tempfile.mkdtemp(prefix="codex-setup-tests-"))
+    for key in _HOME_VARS:
+        os.environ[key] = str(base / key.lower())
+    # Never reach the real OS keychain; tests that need one inject a fake module.
+    import keyring
+    from keyring.backends import null
+
+    keyring.set_keyring(null.Keyring())
 
 
 @pytest.fixture(autouse=True)

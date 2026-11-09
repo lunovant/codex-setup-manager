@@ -81,8 +81,9 @@ def test_setup_writes_config_keeps_settings(svc, capsys, monkeypatch):
         assert KEY not in blob
     assert svc.secret_store().get("LUNOVANT_API_KEY") == KEY
     st = json.loads(state)
-    assert st["managed_provider_ids"] == ["lunovant"]
-    assert st["original_top_level"] == {"model": None, "model_provider": None}
+    (own,) = st["configs"].values()
+    assert own["managed_provider_ids"] == ["lunovant"]
+    assert own["original_top_level"] == {"model": None, "model_provider": None}
 
 
 def test_setup_dry_run(svc, capsys, monkeypatch):

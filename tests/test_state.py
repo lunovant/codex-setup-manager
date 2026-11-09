@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from codex_setup.core import paths
-from codex_setup.core.state import AppState, Profile, load_state, save_state
+from codex_setup.core.state import AppState, ConfigOwnership, Profile, load_state, save_state
 from codex_setup.providers.catalog import DEFAULT_MODEL, LUNOVANT, LUNOVANT_MODELS
 
 
@@ -16,11 +16,15 @@ def test_round_trip(isolated_env) -> None:
     state = AppState(
         profiles={"lunovant": Profile("lunovant", LUNOVANT, DEFAULT_MODEL, list(LUNOVANT_MODELS))},
         active_profile="lunovant",
-        managed_provider_ids=["lunovant"],
-        original_top_level={"model": "gpt-5", "model_provider": None},
-        original_snapshot="",
         secret_backend="keyring",
         last_test={"when": "2026-11-09T00:00:00", "overall": "ok", "model": DEFAULT_MODEL},
+        configs={
+            "/x/config.toml": ConfigOwnership(
+                managed_provider_ids=["lunovant"],
+                original_top_level={"model": "gpt-5", "model_provider": None},
+                original_snapshot="",
+            )
+        },
     )
     save_state(state, isolated_env)
     assert load_state(isolated_env) == state

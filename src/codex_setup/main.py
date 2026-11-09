@@ -6,6 +6,7 @@ import argparse
 import getpass
 import os
 import sys
+import traceback
 from collections.abc import Callable
 from typing import Any
 
@@ -14,8 +15,8 @@ from codex_setup.app import SetupService, StatusInfo
 from codex_setup.core.config_store import SaveResult
 from codex_setup.core.errors import CodexSetupError, ValidationError
 from codex_setup.providers.catalog import DEFAULT_MODEL, normalize_base_url, suggest_v1
-from codex_setup.security.redact import mask_key, redact
-from codex_setup.ui.i18n import default_lang, set_lang, t
+from codex_setup.security.redact import mask_key, redact, redact_config_text
+from codex_setup.ui.i18n import default_lang, set_lang, t, tr_check, tr_step
 
 _SEEN_SECRETS: list[str] = []
 
@@ -129,6 +130,7 @@ def _apply(ns: argparse.Namespace, op: Callable[[bool], SaveResult | None]) -> S
         res = op(True)
         if res is not None:
             _show_diff(res)
+            _show_notes(res)
             _out(t("dry_run_done"))
         return res
     preview = op(True)
@@ -147,14 +149,30 @@ def _apply(ns: argparse.Namespace, op: Callable[[bool], SaveResult | None]) -> S
         _out(t("applied_backup", path=res.backup))
     else:
         _out(t("applied"))
+    _show_notes(res)
     return res
 
 
 def _show_diff(res: SaveResult) -> None:
     if res.diff:
-        _out(res.diff.rstrip("\n"))
+        # Display only: secrets and values of sensitive keys are masked; disk is untouched.
+        _out(redact_config_text(res.diff, _SEEN_SECRETS).rstrip("\n"))
     else:
         _out(t("no_changes"))
+
+
+def _show_notes(res: SaveResult | None) -> None:
+    for key, params in (res.notes if res is not None else []):
+        _out(t(key, **params))
+
+
+def _session_warning(svc: SetupService, backend: str) -> None:
+    try:
+        name = svc.secret_store(backend).backend_name
+    except CodexSetupError:
+        return
+    if name == "session":
+        _err(t("session_warn_cli"))
 
 
 def format_status(st: StatusInfo) -> list[str]:
@@ -213,12 +231,19 @@ def _cmd_setup(svc: SetupService, ns: argparse.Namespace) -> int:
         if entered:
             _SEEN_SECRETS.append(entered)
             key = entered
+    if ns.secret_backend == "file":
+        _err(t("file_warn"))
+        if not ns.dry_run and not _confirm(ns, t("file_confirm")):
+            _out(t("cancelled"))
+            return 0
     _apply(
         ns,
         lambda dry: svc.quick_setup(url, model, key, ns.secret_backend, dry),
     )
     if not ns.dry_run:
         _out(t("qs_done"))
+    if key and not ns.dry_run:
+        _session_warning(svc, ns.secret_backend)
     return 0
 
 
@@ -244,6 +269,7 @@ def _cmd_api(svc: SetupService, ns: argparse.Namespace) -> int:
     if not ns.dry_run:
         if key:
             _out(t("api_key_saved", backend=svc.secret_store().backend_name, masked=mask_key(key)))
+            _session_warning(svc, svc.load_state().secret_backend or "auto")
         elif ns.delete_key:
             _out(t("api_deleted"))
     return 0
@@ -253,7 +279,7 @@ def render_report_lines(report: Any) -> list[str]:
     lines = []
     for s in report.steps:
         problem = s.problem.value if s.problem else "-"
-        lines.append(f"{s.step:<18} {s.outcome.value.upper():<5} {problem:<22} {s.detail}")
+        lines.append(f"{s.step:<18} {s.outcome.value.upper():<5} {problem:<22} {tr_step(s)}")
     lines.append(t("test_overall", overall=report.overall.value.upper()))
     return lines
 
@@ -279,7 +305,12 @@ def _cmd_sandbox(svc: SetupService, ns: argparse.Namespace) -> int:
 
 def _cmd_backup(svc: SetupService, ns: argparse.Namespace) -> int:
     if ns.action == "create":
-        _out(t("bk_created_ok", path=svc.backup_create()))
+        if ns.dry_run:
+            svc.backup_create(dry_run=True)
+            _out(t("dry_would_backup"))
+            _out(t("dry_run_done"))
+        else:
+            _out(t("bk_created_ok", path=svc.backup_create()))
     elif ns.action == "list":
         items = svc.backup_list()
         if not items:
@@ -302,11 +333,12 @@ def _cmd_diagnose(svc: SetupService, ns: argparse.Namespace) -> int:
     lang = get_lang()
     failed = False
     for c in diag.checks:
-        _out(f"[{c.outcome.value.upper()}] {c.title}")
-        if c.detail:
-            _out(f"    {c.detail}")
-        if c.fix:
-            _out(f"    {t('dg_fix')}: {c.fix}")
+        title, detail, fix = tr_check(c)
+        _out(f"[{c.outcome.value.upper()}] {title}")
+        if detail:
+            _out(f"    {detail}")
+        if fix:
+            _out(f"    {t('dg_fix')}: {fix}")
         failed = failed or c.outcome.value == "fail"
     for issue in diag.issues:
         _out(issue.title[lang])
@@ -332,13 +364,13 @@ def _cmd_profile(svc: SetupService, ns: argparse.Namespace) -> int:
         raise ValidationError(t("cli_need_arg", name="NAME"))
     if ns.action == "add":
         models = [m.strip() for m in (ns.models or "").split(",") if m.strip()]
-        svc.add_profile(ns.name, ns.base_url, ns.env_key, ns.model, models)
-        _out(t("pf_added", name=ns.name))
+        svc.add_profile(ns.name, ns.base_url, ns.env_key, ns.model, models, dry_run=ns.dry_run)
+        _out(t("dry_would_profile_add" if ns.dry_run else "pf_added", name=ns.name))
     elif ns.action == "use":
         _apply(ns, lambda dry: svc.use_profile(ns.name, dry))
     else:
-        svc.remove_profile(ns.name)
-        _out(t("pf_removed", name=ns.name))
+        svc.remove_profile(ns.name, dry_run=ns.dry_run)
+        _out(t("dry_would_profile_remove" if ns.dry_run else "pf_removed", name=ns.name))
     return 0
 
 
@@ -362,6 +394,7 @@ def _cmd_env(svc: SetupService, ns: argparse.Namespace) -> int:
     if ns.action == "install":
         _out(env_warning(svc))
         if ns.dry_run:
+            _out(t("dry_would_env_install", where=svc.env_install(True, dry_run=True)))
             _out(t("dry_run_done"))
             return 0
         if not _confirm(ns, t("env_consent")):
@@ -369,13 +402,24 @@ def _cmd_env(svc: SetupService, ns: argparse.Namespace) -> int:
             return 0
         _out(t("env_installed", where=svc.env_install(True)))
     else:
-        _out(t("env_removed") if svc.env_remove() else t("env_nothing"))
+        outcome = svc.env_remove(dry_run=ns.dry_run)
+        _out(
+            {
+                "removed": t("env_removed"),
+                "restored": t("env_restored"),
+                "nothing": t("env_nothing"),
+                "not_owned": t("env_not_owned"),
+                "changed": t("env_changed"),
+            }[outcome]
+        )
+        if ns.dry_run:
+            _out(t("dry_run_done"))
     return 0
 
 
 def _cmd_uninstall(svc: SetupService, ns: argparse.Namespace) -> int:
     _out(t("un_info"))
-    _apply(ns, lambda dry: svc.uninstall(dry, delete_secret=ns.delete_key and not dry))
+    _apply(ns, lambda dry: svc.uninstall(dry, delete_secret=ns.delete_key))
     if not ns.dry_run:
         _out(t("un_done"))
     return 0
@@ -440,6 +484,15 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     except CodexSetupError as exc:
         _err(t("error", msg=redact(str(exc), _SEEN_SECRETS)))
+        return 1
+    except Exception as exc:  # last resort: never leak a raw traceback or secrets
+        debug = os.environ.get("CODEX_SETUP_DEBUG") == "1"
+        line = redact(f"{exc.__class__.__name__}: {exc}", _SEEN_SECRETS).splitlines()[0][:300]
+        _err(t("err_unexpected", msg=line))
+        if debug:
+            _err(redact(traceback.format_exc(), _SEEN_SECRETS))
+        else:
+            _err(t("err_debug_hint"))
         return 1
 
 

@@ -23,8 +23,8 @@ from codex_setup.providers.catalog import (
     normalize_base_url,
     suggest_v1,
 )
-from codex_setup.security.redact import mask_key, redact
-from codex_setup.ui.i18n import t
+from codex_setup.security.redact import mask_key, redact, redact_config_text
+from codex_setup.ui.i18n import t, tr_check, tr_step
 
 _OUTCOME_STYLE = {"ok": "green", "warn": "yellow", "fail": "red", "skip": "dim"}
 
@@ -57,7 +57,12 @@ class TuiApp:
         return value
 
     def show_diff(self, diff: str) -> None:
-        self.c.print(Panel(Syntax(diff, "diff", theme="ansi_dark"), title=t("diff_title")))
+        shown = redact_config_text(diff, self.secrets)  # display only; disk is untouched
+        self.c.print(Panel(Syntax(shown, "diff", theme="ansi_dark"), title=t("diff_title")))
+
+    def show_notes(self, res: SaveResult | None) -> None:
+        for key, params in (res.notes if res is not None else []):
+            self.say(t(key, **params))
 
     def apply(self, op: Callable[[bool], SaveResult | None]) -> SaveResult | None:
         """Preview -> diff -> Confirm -> apply (or just preview when dry-run is on)."""
@@ -69,6 +74,7 @@ class TuiApp:
             return op(False) if not self.dry_run else preview
         self.show_diff(preview.diff)
         if self.dry_run:
+            self.show_notes(preview)
             self.say(t("dry_run_done"), "yellow")
             return preview
         if not Confirm.ask(t("apply_confirm"), default=True, console=self.c):
@@ -79,7 +85,13 @@ class TuiApp:
             self.say(t("applied_backup", path=res.backup), "green")
         else:
             self.say(t("applied"), "green")
+        self.show_notes(res)
         return res
+
+    def _dry_note(self, key: str, **params: str) -> None:
+        if self.dry_run:
+            self.say(t(key, **params), "yellow")
+            self.say(t("dry_run_done"), "yellow")
 
     def guarded(self, fn: Callable[[], Any]) -> None:
         try:
@@ -168,10 +180,15 @@ class TuiApp:
         backend = Prompt.ask(
             t("qs_backend"), choices=["auto", "session", "file"], default="auto", console=self.c
         )
+        if backend == "file":
+            self.say(t("file_warn"), "red")
+            if not self.dry_run and not Confirm.ask(t("file_confirm"), default=False, console=self.c):
+                self.say(t("cancelled"))
+                return
         self.apply(lambda dry: self.svc.quick_setup(normalized, model, key, backend, dry))
         if not self.dry_run:
             self.say(t("qs_done"), "green")
-            if self.svc.secret_store(backend).backend_name == "session":
+            if key and self.svc.secret_store(backend).backend_name == "session":
                 self.say(t("qs_session_warn"), "yellow")
 
     def _model_table(self, names: list[str], current: str | None) -> Table:
@@ -201,14 +218,17 @@ class TuiApp:
             if raw in ("", "0"):
                 return
             if low == "A":
-                self.svc.add_custom_model(Prompt.ask(t("model_name"), console=self.c))
+                self.svc.add_custom_model(Prompt.ask(t("model_name"), console=self.c), self.dry_run)
+                self._dry_note("dry_would_model")
                 continue
             if low == "E":
                 old = Prompt.ask(t("model_old"), console=self.c)
-                self.svc.edit_custom_model(old, Prompt.ask(t("model_name"), console=self.c))
+                self.svc.edit_custom_model(old, Prompt.ask(t("model_name"), console=self.c), self.dry_run)
+                self._dry_note("dry_would_model")
                 continue
             if low == "R":
-                self.svc.remove_custom_model(Prompt.ask(t("model_old"), console=self.c))
+                self.svc.remove_custom_model(Prompt.ask(t("model_old"), console=self.c), self.dry_run)
+                self._dry_note("dry_would_model")
                 continue
             if raw.isdigit() and 1 <= int(raw) <= len(names):
                 model = names[int(raw) - 1]
@@ -232,7 +252,8 @@ class TuiApp:
             key = self.hidden(t("api_key"))
             if key:
                 if self.dry_run:
-                    self.say(t("dry_run_done"), "yellow")
+                    self.svc.set_api(api_key=key, dry_run=True)
+                    self._dry_note("dry_would_key_set")
                     return
                 self.svc.set_api(api_key=key)
                 self.say(
@@ -241,7 +262,8 @@ class TuiApp:
                 )
         elif choice == 3:
             if self.dry_run:
-                self.say(t("dry_run_done"), "yellow")
+                self.svc.set_api(delete_key=True, dry_run=True)
+                self._dry_note("dry_would_key_delete")
             elif Confirm.ask(t("api_delete_confirm"), default=False, console=self.c):
                 self.svc.set_api(delete_key=True)
                 self.say(t("api_deleted"), "green")
@@ -256,7 +278,7 @@ class TuiApp:
                 s.step,
                 f"[{style}]{s.outcome.value.upper()}[/{style}]" if style else s.outcome.value.upper(),
                 s.problem.value if s.problem else "-",
-                redact(s.detail, self.secrets),
+                redact(tr_step(s), self.secrets),
             )
         self.c.print(table)
         self.say(t("test_overall", overall=report.overall.value.upper()))
@@ -292,7 +314,11 @@ class TuiApp:
         self.say(t("bk_menu"))
         choice = IntPrompt.ask(t("menu_choice"), choices=["0", "1", "2", "3"], console=self.c)
         if choice == 1:
-            self.say(t("bk_created_ok", path=self.svc.backup_create()))
+            if self.dry_run:
+                self.svc.backup_create(dry_run=True)
+                self._dry_note("dry_would_backup")
+            else:
+                self.say(t("bk_created_ok", path=self.svc.backup_create()))
         elif choice == 2:
             bid = Prompt.ask(t("bk_pick"), default=items[0].id if items else "", console=self.c)
             self.apply(lambda dry: self.svc.backup_restore(bid, dry))
@@ -315,7 +341,8 @@ class TuiApp:
             table.add_column(t("test_detail"), overflow="fold")
             table.add_column(t("dg_fix"), overflow="fold")
             for r in diag.checks:
-                table.add_row(r.title, r.outcome.value.upper(), redact(r.detail, self.secrets), r.fix)
+                title, detail, fix = tr_check(r)
+                table.add_row(title, r.outcome.value.upper(), redact(detail, self.secrets), fix)
             self.c.print(table)
             return
         text = Prompt.ask(t("dg_paste"), console=self.c)
@@ -353,12 +380,18 @@ class TuiApp:
                 url = Prompt.ask(t("pf_url"), console=self.c).strip()
                 env_key = Prompt.ask(t("pf_env_key"), console=self.c).strip()
             model = Prompt.ask(t("pf_model"), default=DEFAULT_MODEL, console=self.c).strip()
-            self.svc.add_profile(name, url, env_key, model)
-            self.say(t("pf_added", name=name), "green")
+            self.svc.add_profile(name, url, env_key, model, dry_run=self.dry_run)
+            if self.dry_run:
+                self._dry_note("dry_would_profile_add", name=name)
+            else:
+                self.say(t("pf_added", name=name), "green")
         elif choice == 3:
             name = Prompt.ask(t("pf_pick"), console=self.c).strip()
-            self.svc.remove_profile(name)
-            self.say(t("pf_removed", name=name))
+            self.svc.remove_profile(name, dry_run=self.dry_run)
+            if self.dry_run:
+                self._dry_note("dry_would_profile_remove", name=name)
+            else:
+                self.say(t("pf_removed", name=name))
 
     def uninstall(self) -> None:
         self.say(t("un_info"))
@@ -368,18 +401,20 @@ class TuiApp:
         delete = False
         if not self.dry_run:
             delete = Confirm.ask(t("un_secret"), default=False, console=self.c)
-        res = self.svc.uninstall(True)
+        res = self.svc.uninstall(True, delete_secret=delete)
         if res.changed:
             self.show_diff(res.diff)
         else:
             self.say(t("no_changes"))
+        self.show_notes(res)
         if self.dry_run:
             self.say(t("dry_run_done"), "yellow")
             return
         if not Confirm.ask(t("apply_confirm"), default=True, console=self.c):
             self.say(t("cancelled"))
             return
-        self.svc.uninstall(False, delete_secret=delete)
+        res = self.svc.uninstall(False, delete_secret=delete)
+        self.show_notes(res)
         self.say(t("un_done"), "green")
 
     def launch(self) -> None:

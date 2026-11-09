@@ -69,15 +69,24 @@ def test_broadcast_uses_ctypes(monkeypatch):
 
     seen = {}
 
-    class U:
-        def SendMessageTimeoutW(self, *a):
+    class Fn:
+        def __call__(self, *a):
             seen["args"] = a
             return 1
+
+    fn = Fn()
+
+    class U:
+        SendMessageTimeoutW = fn
 
     monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(user32=U()), raising=False)
     windows.broadcast_env_change()
     a = seen["args"]
     assert a[0] == 0xFFFF and a[1] == 0x1A and a[3] == "Environment" and a[4] == 2 and a[5] == 5000
+    # prototypes declared: 7 args, string pointer for LPARAM, size_t result buffer
+    assert len(fn.argtypes) == 7 and fn.argtypes[3] is ctypes.c_wchar_p
+    assert fn.argtypes[6]._type_ is ctypes.c_size_t
+    assert fn.restype is not None
 
 
 def test_module_imports_without_winreg():

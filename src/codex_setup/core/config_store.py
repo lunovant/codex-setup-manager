@@ -9,7 +9,7 @@ import stat
 import tempfile
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import tomlkit
@@ -33,6 +33,8 @@ class SaveResult:
     diff: str
     backup: Path | None
     dry_run: bool
+    # (i18n key, params) hints for the presentation layer, e.g. fields left untouched
+    notes: list[tuple[str, dict[str, str]]] = field(default_factory=list)
 
 
 _TOMLLIB_POS = re.compile(r"\(at line (\d+), column (\d+)\)")
@@ -126,8 +128,20 @@ def _match_line_endings(original: str, new: str) -> str:
     return new
 
 
-def _rollback(loaded: LoadedConfig) -> None:
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError):
+        return "\0unreadable"
+
+
+def _rollback(loaded: LoadedConfig, written: str | None = None) -> None:
+    """Restore the original text, but only if the disk still holds what we wrote."""
     path = loaded.path
+    if written is not None and _read_text_or_none(path) != written:
+        return
     try:
         if loaded.existed:
             atomic_write_text(path, loaded.original_text)
@@ -163,14 +177,21 @@ def save_config(
         except OSError as exc:
             raise ConfigWriteError(f"Cannot create backup: {exc}", path=loaded.path) from exc
 
+    current = _read_text_or_none(loaded.path)
+    if current != (loaded.original_text if loaded.existed else None):
+        raise ConfigWriteError(
+            "config.toml changed on disk since it was loaded; reload and try again",
+            path=loaded.path,
+        )
+    on_disk = new_text
     try:
         atomic_write_text(loaded.path, new_text)
-        written = loaded.path.read_bytes().decode("utf-8")
+        written = on_disk = loaded.path.read_bytes().decode("utf-8")
         validate_text(written, loaded.path)
         if written != new_text:
             raise ConfigWriteError("Written file differs from expected content", loaded.path)
     except (ConfigWriteError, ConfigParseError, OSError, UnicodeDecodeError) as exc:
-        _rollback(loaded)
+        _rollback(loaded, on_disk)
         if isinstance(exc, ConfigWriteError):
             raise
         raise ConfigWriteError(

@@ -65,8 +65,17 @@ def normalize_base_url(url: str) -> str:
         raise ValidationError(f"Invalid URL: {raw!r}") from exc
     if parts.scheme not in ("http", "https") or not host:
         raise ValidationError(f"URL must start with http:// or https:// and include a host: {raw!r}")
+    if "@" in parts.netloc or parts.username is not None or parts.password is not None:
+        raise ValidationError(
+            "URL must not contain credentials (user:pass@host); store the key with --key-stdin"
+        )
+    if "?" in raw:
+        raise ValidationError(
+            "URL must not contain a query string; Codex base_url needs none "
+            "(extra parameters belong in query_params)"
+        )
     path = parts.path.rstrip("/")
-    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, "")).rstrip("/")
+    return urlunsplit((parts.scheme, parts.netloc, path, "", "")).rstrip("/")
 
 
 def suggest_v1(url: str) -> str:

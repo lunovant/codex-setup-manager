@@ -24,14 +24,15 @@ def test_quick_setup_flow(svc):
     res = svc.quick_setup(None, "gpt-6.1-sol", "k-1234567890", "session")
     assert res.changed and "lunovant" in res.diff
     st = svc.load_state()
-    assert st.managed_provider_ids == ["lunovant"]
-    assert st.original_snapshot == "" and st.active_profile == "lunovant"
+    own = svc.ownership(st)
+    assert own.managed_provider_ids == ["lunovant"]
+    assert own.original_snapshot == "" and st.active_profile == "lunovant"
     assert svc.secret_store().get("LUNOVANT_API_KEY") == "k-1234567890"
     # second run does not re-record originals or duplicate the managed id
     svc.quick_setup(None, "gpt-6-luna", None, "session")
-    st = svc.load_state()
-    assert st.managed_provider_ids == ["lunovant"]
-    assert st.original_top_level == {"model": None, "model_provider": None}
+    own = svc.ownership()
+    assert own.managed_provider_ids == ["lunovant"]
+    assert own.original_top_level == {"model": None, "model_provider": None}
 
 
 def test_preexisting_lunovant_not_managed(svc):
@@ -40,7 +41,7 @@ def test_preexisting_lunovant_not_managed(svc):
     cfg.write_text('[model_providers.lunovant]\nname = "L"\nbase_url = "https://x/v1"\n'
                    'env_key = "LUNOVANT_API_KEY"\nwire_api = "responses"\n', encoding="utf-8")
     svc.quick_setup(None, "gpt-6.1-sol", None, "session")
-    assert svc.load_state().managed_provider_ids == []
+    assert svc.ownership().managed_provider_ids == []
 
 
 def test_custom_url_and_models(svc):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import socket
 import ssl
+import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from urllib.parse import urlsplit
@@ -42,8 +44,10 @@ class StepResult:
     step: str
     outcome: Outcome
     problem: Problem | None
-    detail: str
+    detail: str  # English, for logs/tests
     http_status: int | None = None
+    code: str | None = None  # stable i18n key (``at_*``) used by the presentation layer
+    params: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,6 +55,11 @@ class ApiTestReport:
     steps: list[StepResult] = field(default_factory=list)
     overall: Outcome = Outcome.WARN
 
+
+MAX_STREAM_BYTES = 2 * 1024 * 1024
+_START_EVENTS = {"response.created", "response.in_progress", "response.output_text.delta"}
+_DONE_EVENTS = {"response.completed", "response.done"}
+_ERROR_EVENTS = {"error", "response.failed", "response.incomplete"}
 
 _STEPS = ("connect", "models", "model_listed", "responses", "responses_stream")
 _DNS_MARKERS = ("name or service not known", "nodename nor servname", "getaddrinfo failed",
@@ -109,6 +118,115 @@ def _looks_like_response(data: object) -> bool:
     )
 
 
+@dataclass
+class StreamVerdict:
+    outcome: Outcome
+    problem: Problem | None
+    detail: str
+    code: str
+    params: dict[str, str] = field(default_factory=dict)
+
+
+def _event_message(obj: object) -> str:
+    if isinstance(obj, dict):
+        for source in (obj, obj.get("response")):
+            if isinstance(source, dict):
+                err = source.get("error")
+                if isinstance(err, dict) and err.get("message"):
+                    return str(err["message"])
+                if isinstance(err, str):
+                    return err
+                if source.get("message"):
+                    return str(source["message"])
+                details = source.get("incomplete_details")
+                if isinstance(details, dict) and details.get("reason"):
+                    return str(details["reason"])
+    return ""
+
+
+def check_sse_stream(
+    lines: Iterable[str],
+    api_key: str,
+    *,
+    deadline: float,
+    max_bytes: int = MAX_STREAM_BYTES,
+    clock=time.monotonic,
+) -> StreamVerdict:
+    """Parse SSE records (event/data lines, blank-line terminated) and judge the stream.
+
+    ``deadline`` is an absolute ``clock()`` value. Stops right after a terminal event.
+    """
+    started = False
+    total = 0
+    event: str | None = None
+    data: list[str] = []
+
+    def fail(detail: str, code: str, problem: Problem = Problem.INCOMPATIBLE, **params: str):
+        return StreamVerdict(Outcome.FAIL, problem, _snippet(detail, api_key), code, params)
+
+    def dispatch() -> StreamVerdict | None:
+        nonlocal started, event, data
+        name, payload, event, data = event, "\n".join(data), None, []
+        if not payload and not name:
+            return None
+        if payload.strip() == "[DONE]":
+            return None
+        obj: object = None
+        if payload:
+            try:
+                obj = json.loads(payload)
+            except ValueError:
+                if name in _ERROR_EVENTS:
+                    return fail(f"Stream error event: {payload}", "at_stream_error", message=_snippet(payload, api_key))
+                return fail("Stream event data is not valid JSON.", "at_stream_bad_json")
+        kind = obj.get("type") if isinstance(obj, dict) else None
+        kind = kind if isinstance(kind, str) and kind else name
+        if kind in _ERROR_EVENTS:
+            msg = _snippet(_event_message(obj) or kind, api_key)
+            return fail(f"Stream reported {kind}: {msg}", "at_stream_error", message=msg)
+        if kind in _START_EVENTS:
+            started = True
+            return None
+        if kind in _DONE_EVENTS:
+            if not started:
+                return fail(
+                    "response.completed arrived before any start event "
+                    "(response.created / response.in_progress / response.output_text.delta).",
+                    "at_stream_no_start",
+                )
+            return StreamVerdict(Outcome.OK, None, "Streaming works.", "at_stream_ok")
+        return None
+
+    for raw in lines:
+        if clock() > deadline:
+            return StreamVerdict(
+                Outcome.FAIL, Problem.TIMEOUT, "Streaming did not finish before the deadline.",
+                "at_stream_deadline",
+            )
+        total += len(raw.encode("utf-8", "replace")) + 1
+        if total > max_bytes:
+            return fail("Streaming response exceeded the 2 MiB limit.", "at_stream_too_big")
+        line = raw.rstrip("\r")
+        if line == "":
+            verdict = dispatch()
+            if verdict is not None:
+                return verdict
+        elif line.startswith(":"):
+            continue  # comment / heartbeat
+        elif line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:"):
+            data.append(line[5:].removeprefix(" "))
+    verdict = dispatch()  # stream ended without a trailing blank line
+    if verdict is not None:
+        return verdict
+    return fail(
+        "Streaming response did not finish with response.completed "
+        "(Codex requires streaming Responses).",
+        "at_stream_incomplete",
+    )
+
+
 def run_api_test(
     base_url: str,
     api_key: str,
@@ -116,18 +234,22 @@ def run_api_test(
     *,
     client: httpx.Client | None = None,
     timeout: float = 30.0,
+    stream_deadline: float | None = None,
 ) -> ApiTestReport:
     steps: list[StepResult] = []
 
-    def add(step, outcome, problem, detail, status=None):
-        steps.append(StepResult(step, outcome, problem, detail, status))
+    def add(step, outcome, problem, detail, status=None, code=None, **params):
+        if code is None:
+            code = f"at_{problem.value}" if problem else None
+        steps.append(StepResult(step, outcome, problem, detail, status, code,
+                                {k: str(v) for k, v in params.items()}))
         return outcome
 
     def finish() -> ApiTestReport:
         done = {s.step for s in steps}
         for name in _STEPS:
             if name not in done:
-                steps.append(StepResult(name, Outcome.SKIP, None, "Skipped."))
+                steps.append(StepResult(name, Outcome.SKIP, None, "Skipped.", code="at_skipped"))
         order = {n: i for i, n in enumerate(_STEPS)}
         steps.sort(key=lambda s: order[s.step])
         by = {s.step: s for s in steps}
@@ -142,7 +264,9 @@ def run_api_test(
     base = (base_url or "").strip().rstrip("/")
     parts = urlsplit(base)
     if parts.scheme not in ("http", "https") or not parts.netloc or not parts.hostname:
-        add("connect", Outcome.FAIL, Problem.BAD_URL, "The base URL must start with http:// or https:// and include a host.")
+        add("connect", Outcome.FAIL, Problem.BAD_URL,
+            "The base URL must start with http:// or https:// and include a host.",
+            code="at_bad_url_scheme")
         return finish()
     origin = f"{parts.scheme}://{parts.netloc}/"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -153,7 +277,8 @@ def run_api_test(
         # 1. connect
         try:
             r = http.get(origin)
-            add("connect", Outcome.OK, None, f"Reachable (HTTP {r.status_code}).", r.status_code)
+            add("connect", Outcome.OK, None, f"Reachable (HTTP {r.status_code}).", r.status_code,
+                code="at_connect_ok", http=r.status_code)
         except httpx.HTTPError as exc:
             prob, detail = classify_transport(exc, api_key)
             add("connect", Outcome.FAIL, prob, detail)
@@ -178,29 +303,35 @@ def run_api_test(
             return finish()
         if status == 404:
             add("models", Outcome.WARN, Problem.UNKNOWN,
-                "GET /models returned 404 (endpoint missing). The base URL may need /v1.", status)
+                "GET /models returned 404 (endpoint missing). The base URL may need /v1.", status,
+                code="at_models_404")
         elif 200 <= status < 300:
             data = _is_json(r)
             if data is None:
                 add("models", Outcome.FAIL, Problem.BAD_URL,
-                    "This looks like a web page, not an API. Try adding /v1 to the base URL.", status)
+                    "This looks like a web page, not an API. Try adding /v1 to the base URL.", status,
+                    code="at_web_page")
                 return finish()
             if isinstance(data, dict) and isinstance(data.get("data"), list):
                 models = [str(m.get("id")) for m in data["data"] if isinstance(m, dict)]
-            add("models", Outcome.OK, None, f"Model list available ({len(models or [])} models).", status)
+            add("models", Outcome.OK, None, f"Model list available ({len(models or [])} models).", status,
+                code="at_models_ok", count=len(models or []))
         else:
             sp = _status_problem(status)
             add("models", Outcome.WARN, sp[0] if sp else Problem.UNKNOWN,
-                _snippet(f"HTTP {status}: {r.text}", api_key), status)
+                _snippet(f"HTTP {status}: {r.text}", api_key), status,
+                code=f"at_{sp[0].value}" if sp else "at_http_error", http=status)
 
         # 3. model_listed
         if models is None:
-            add("model_listed", Outcome.SKIP, None, "Model list unavailable.")
+            add("model_listed", Outcome.SKIP, None, "Model list unavailable.", code="at_listed_skip")
         elif model in models:
-            add("model_listed", Outcome.OK, None, f"Model {model} is listed.")
+            add("model_listed", Outcome.OK, None, f"Model {model} is listed.",
+            code="at_listed_ok", model=model)
         else:
             add("model_listed", Outcome.WARN, Problem.MODEL_NOT_FOUND,
-                f"Model {model} is not in the provider's model list.")
+                f"Model {model} is not in the provider's model list.",
+                code="at_listed_missing", model=model)
 
         body = {"model": model, "input": "Reply with OK", "max_output_tokens": 16}
 
@@ -214,13 +345,15 @@ def run_api_test(
         status = r.status_code
         if 200 <= status < 300:
             if _looks_like_response(_is_json(r)):
-                add("responses", Outcome.OK, None, "Responses API works.", status)
+                add("responses", Outcome.OK, None, "Responses API works.", status,
+                    code="at_responses_ok")
             else:
                 add("responses", Outcome.FAIL, Problem.INCOMPATIBLE,
-                    _snippet(f"2xx but not a Responses API reply: {r.text}", api_key), status)
+                    _snippet(f"2xx but not a Responses API reply: {r.text}", api_key), status,
+                    code="at_not_responses")
         else:
             p, d = _error_problem(status, r.text, model)
-            add("responses", Outcome.FAIL, p, _snippet(d, api_key), status)
+            add("responses", Outcome.FAIL, p, _snippet(d, api_key), status, http=status)
 
         # 5. responses_stream
         try:
@@ -230,28 +363,14 @@ def run_api_test(
                 if not 200 <= status < 300:
                     text = sr.read().decode("utf-8", "replace")
                     p, d = _error_problem(status, text, model)
-                    add("responses_stream", Outcome.FAIL, p, _snippet(d, api_key), status)
+                    add("responses_stream", Outcome.FAIL, p, _snippet(d, api_key), status, http=status)
                 else:
-                    events = set()
-                    for line in sr.iter_lines():
-                        if line.startswith("event:"):
-                            events.add(line[6:].strip())
-                        elif line.startswith("data:"):
-                            payload = line[5:].strip()
-                            try:
-                                t = json.loads(payload).get("type")
-                            except (ValueError, AttributeError):
-                                t = None
-                            if t:
-                                events.add(t)
-                    started = events & {"response.created", "response.output_text.delta"}
-                    done = events & {"response.completed", "response.done"}
-                    if started and done:
-                        add("responses_stream", Outcome.OK, None, "Streaming works.", status)
-                    else:
-                        add("responses_stream", Outcome.FAIL, Problem.INCOMPATIBLE,
-                            "Streaming response did not finish with response.completed "
-                            "(Codex requires streaming Responses).", status)
+                    limit = stream_deadline if stream_deadline is not None else timeout * 2
+                    verdict = check_sse_stream(
+                        sr.iter_lines(), api_key, deadline=time.monotonic() + limit
+                    )
+                    add("responses_stream", verdict.outcome, verdict.problem, verdict.detail,
+                        status, verdict.code, **verdict.params)
         except Exception as exc:
             prob, detail = classify_transport(exc, api_key)
             add("responses_stream", Outcome.FAIL, prob, detail)

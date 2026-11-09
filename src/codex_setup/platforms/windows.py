@@ -71,22 +71,28 @@ def _import_winreg() -> Any:
     return winreg
 
 
-def get_user_env(name: str) -> str | None:
+def get_user_env_typed(name: str) -> tuple[str, int] | None:
+    """Current (value, registry type) or None when the value is absent."""
     winreg = _import_winreg()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _ENV_SUBKEY, 0, winreg.KEY_READ) as key:
-            value, _type = winreg.QueryValueEx(key, name)
+            value, reg_type = winreg.QueryValueEx(key, name)
     except FileNotFoundError:
         return None
-    return str(value)
+    return str(value), int(reg_type)
 
 
-def set_user_env(name: str, value: str) -> None:
+def get_user_env(name: str) -> str | None:
+    typed = get_user_env_typed(name)
+    return None if typed is None else typed[0]
+
+
+def set_user_env(name: str, value: str, reg_type: int | None = None) -> None:
     winreg = _import_winreg()
     with winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER, _ENV_SUBKEY, 0, winreg.KEY_SET_VALUE
     ) as key:
-        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+        winreg.SetValueEx(key, name, 0, winreg.REG_SZ if reg_type is None else reg_type, value)
     broadcast_env_change()
 
 
@@ -107,12 +113,24 @@ def broadcast_env_change() -> None:
     """Tell running apps the environment changed (best effort)."""
     try:
         import ctypes
+        from ctypes import wintypes
 
         HWND_BROADCAST = 0xFFFF
         WM_SETTINGCHANGE = 0x001A
         SMTO_ABORTIFHUNG = 0x0002
-        result = ctypes.c_ulong()
-        ctypes.windll.user32.SendMessageTimeoutW(  # type: ignore[attr-defined]
+        send = ctypes.windll.user32.SendMessageTimeoutW  # type: ignore[attr-defined]
+        send.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            ctypes.c_wchar_p,  # LPARAM carrying a string pointer
+            wintypes.UINT,
+            wintypes.UINT,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        send.restype = wintypes.LPARAM
+        result = ctypes.c_size_t()
+        send(
             HWND_BROADCAST,
             WM_SETTINGCHANGE,
             0,

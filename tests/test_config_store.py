@@ -169,10 +169,10 @@ def test_os_replace_failure_leaves_original(make_config, isolated_env, monkeypat
     def fail(*a, **k):
         raise PermissionError("denied")
 
-    monkeypatch.setattr(os, "replace", fail)
-    with pytest.raises(ConfigWriteError):
-        cs.save_config(loaded, env=isolated_env)
-    monkeypatch.undo()
+    with monkeypatch.context() as m:  # never monkeypatch.undo(): it would drop env isolation
+        m.setattr(os, "replace", fail)
+        with pytest.raises(ConfigWriteError):
+            cs.save_config(loaded, env=isolated_env)
     assert path.read_bytes() == before
     assert not [p for p in path.parent.iterdir() if p.name.endswith(".tmp")]
 

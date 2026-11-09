@@ -9,7 +9,7 @@ import tomlkit
 from tomlkit.items import Comment, Table
 from tomlkit.toml_document import TOMLDocument
 
-from codex_setup.core.errors import ReservedProviderError, ValidationError
+from codex_setup.core.errors import ConfigParseError, ReservedProviderError, ValidationError
 from codex_setup.providers.catalog import (
     ProviderSpec,
     validate_model_name,
@@ -34,19 +34,34 @@ def _plain(value: Any) -> Any:
 
 def _providers(doc: TOMLDocument) -> Any | None:
     value = doc.get("model_providers")
-    return value if isinstance(value, dict) else None
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ConfigParseError("config.toml: `model_providers` must be a table")
+    return value
 
 
 def get_status(doc: TOMLDocument) -> ConfigStatus:
     model = doc.get("model")
     provider = doc.get("model_provider")
+    for name, value in (("model", model), ("model_provider", provider)):
+        if value is not None and not isinstance(value, str):
+            raise ConfigParseError(f"config.toml: `{name}` must be a string")
     providers = _providers(doc)
+    if providers is not None:
+        for pid, entry in providers.items():
+            if not isinstance(entry, dict):
+                raise ConfigParseError(
+                    f"config.toml: `model_providers.{pid}` must be a table"
+                )
     ids = [str(k) for k in providers.keys()] if providers is not None else []
     windows = doc.get("windows")
-    sandbox = windows.get("sandbox") if isinstance(windows, dict) else None
+    if windows is not None and not isinstance(windows, dict):
+        raise ConfigParseError("config.toml: `windows` must be a table")
+    sandbox = windows.get("sandbox") if windows is not None else None
     active: dict[str, Any] | None = None
-    if providers is not None and provider is not None and str(provider) in providers:
-        active = _plain(providers[str(provider)])
+    if providers is not None and provider is not None and provider in providers:
+        active = _plain(providers[provider])
     return ConfigStatus(
         model=str(model) if model is not None else None,
         model_provider=str(provider) if provider is not None else None,
@@ -101,12 +116,14 @@ def upsert_provider(doc: TOMLDocument, spec: ProviderSpec) -> None:
         "env_key": spec.env_key,
         "wire_api": spec.wire_api,
     }
-    providers = doc.get("model_providers")
+    providers = _providers(doc)
     if providers is None:
         container = tomlkit.table(is_super_table=True)
         doc.add("model_providers", container)
         providers = doc["model_providers"]
     existing = providers.get(spec.id)
+    if existing is not None and not isinstance(existing, dict):
+        raise ConfigParseError(f"config.toml: `model_providers.{spec.id}` must be a table")
     if existing is None:
         table = tomlkit.table()
         for k, v in values.items():
@@ -122,6 +139,48 @@ def upsert_provider(doc: TOMLDocument, spec: ProviderSpec) -> None:
         if k in existing and existing[k] == v:
             continue  # leave untouched to keep formatting
         existing[k] = v
+
+
+PROVIDER_FIELDS = ("name", "base_url", "env_key", "wire_api")
+
+
+def provider_fields(doc: TOMLDocument, provider_id: str) -> dict[str, str | None] | None:
+    """Current name/base_url/env_key/wire_api of a provider table (None = table missing)."""
+    providers = _providers(doc)
+    if providers is None or provider_id not in providers:
+        return None
+    table = providers[provider_id]
+    return {f: (str(table[f]) if f in table else None) for f in PROVIDER_FIELDS}
+
+
+def restore_provider_fields(
+    doc: TOMLDocument,
+    provider_id: str,
+    previous: dict[str, str | None],
+    written: dict[str, str],
+) -> list[str]:
+    """Put back previous values; skip fields the user changed since we wrote them.
+
+    Never deletes the table. Returns the names of fields that were left alone.
+    """
+    providers = _providers(doc)
+    if providers is None or provider_id not in providers:
+        return []
+    table = providers[provider_id]
+    skipped: list[str] = []
+    for name, old in previous.items():
+        current = str(table[name]) if name in table else None
+        if current == old:
+            continue
+        if name in written and current != written[name]:
+            skipped.append(name)
+            continue
+        if old is None:
+            if name in table:
+                del table[name]
+        elif current != old:
+            table[name] = old
+    return skipped
 
 
 def _hand_comments_to_previous(providers: Any, provider_id: str) -> None:
@@ -207,7 +266,10 @@ def set_windows_sandbox(
 __all__ = [
     "RESERVED_PROVIDER_IDS",
     "ConfigStatus",
+    "PROVIDER_FIELDS",
     "get_status",
+    "provider_fields",
+    "restore_provider_fields",
     "remove_provider",
     "restore_top_level",
     "set_active",

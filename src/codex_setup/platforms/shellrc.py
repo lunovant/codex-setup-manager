@@ -75,18 +75,42 @@ def _without_block(text: str) -> str:
     return _block_re().sub("", text)
 
 
-def install_block(rc_path: Path, env_key: str, value: str) -> Path | None:
-    """Add/replace the marker block. Returns the backup path (None if no file existed)."""
+def block_text(env_key: str, value: str) -> str:
     if not _ENV_KEY_RE.match(env_key):
         raise ValidationError(f"Invalid environment variable name: {env_key}")
     if "\n" in value or "\r" in value or "\x00" in value:
         raise ValidationError("Secret value must be a single line.")
+    return f"{START}\nexport {env_key}={shell_quote(value)}\n{END}\n"
+
+
+def read_block(rc_path: Path) -> str | None:
+    """The current marker block text (or None)."""
+    m = _block_re().search(_read(rc_path))
+    return m.group(0) if m else None
+
+
+def write_block_text(rc_path: Path, block: str | None) -> None:
+    """Put back a previously read block (None removes it)."""
+    text = _read(rc_path)
+    base = _without_block(text)
+    if block is not None:
+        if base and not base.endswith("\n"):
+            base += "\n"
+        base += block
+    if base == text:
+        return
+    _backup(rc_path)
+    _write_keep_mode(rc_path, base)
+
+
+def install_block(rc_path: Path, env_key: str, value: str) -> Path | None:
+    """Add/replace the marker block. Returns the backup path (None if no file existed)."""
+    block = block_text(env_key, value)
     text = _read(rc_path)
     backup = _backup(rc_path)
     base = _without_block(text)
     if base and not base.endswith("\n"):
         base += "\n"
-    block = f"{START}\nexport {env_key}={shell_quote(value)}\n{END}\n"
     _write_keep_mode(rc_path, base + block)
     if backup is None:
         os.chmod(rc_path, 0o600)
