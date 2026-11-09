@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codex-setup-manager"
+version = "0.1.0"
+description = "Configure OpenAI Codex (CLI and Desktop) to use a third-party OpenAI-compatible provider such as Lunovant."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+  "rich>=13.7",
+  "tomlkit>=0.13",
+  "httpx>=0.27",
+  "keyring>=25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pyinstaller>=6.10",
+]
+
+[project.scripts]
+codex-setup = "codex_setup.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codex_setup"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "live: hits a real API; needs CODEX_SETUP_LIVE_KEY (skipped otherwise)",
+]
