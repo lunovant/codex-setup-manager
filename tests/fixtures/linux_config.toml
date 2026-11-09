@@ -1,0 +1,15 @@
+# Cấu hình Codex trên Linux: giữ nguyên chú thích tiếng Việt
+model = "gpt-5-codex"
+
+[profiles.fast]
+model = "gpt-5-mini"
+# hồ sơ nhanh
+
+[model_providers.lunovant]
+name = "Lunovant (old)"
+base_url = "https://old.example.com/v1"
+env_key = "OLD_KEY"
+http_headers = { "X-Team" = "mobile" }   # giữ header
+
+[tui]
+notifications = true

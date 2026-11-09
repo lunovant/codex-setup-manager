@@ -1,0 +1,13 @@
+# Codex config (Windows)
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[windows]
+sandbox = "elevated"
+
+[projects.'C:\Users\dev\work']
+trust_level = "trusted"
+
+[mcp_servers.tools]
+command = "C:\\Program Files\\nodejs\\node.exe"
+args = ["C:\\tools\\server.js"]

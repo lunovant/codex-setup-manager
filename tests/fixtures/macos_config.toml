@@ -1,0 +1,24 @@
+# macOS Codex config
+model = "gpt-5"
+model_provider = "azure"   # keep this comment
+approval_policy = "never"
+
+[model_providers.azure]
+name = "Azure"
+base_url = "https://example.openai.azure.com/openai"
+env_key = "AZURE_OPENAI_API_KEY"
+wire_api = "responses"
+query_params = { api-version = "2025-04-01-preview" }
+
+[model_providers.other]
+name = "Other"
+base_url = "https://other.example.com/v1"
+env_key = "OTHER_API_KEY"
+
+# MCP servers
+[mcp_servers.docs]
+command = "npx"
+args = ["-y", "docs-server"]
+
+[mcp_servers.docs.env]
+TOKEN_NAME = "docs"
