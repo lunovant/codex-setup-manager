@@ -45,16 +45,22 @@ Base URL: `https://api.lunovant.tech`. Endpoint API: `https://api.lunovant.tech/
 
 ## Chạy lần đầu
 
-Các file chạy chưa được ký số, nên hệ điều hành sẽ hiện cảnh báo ở lần chạy đầu tiên.
+File chạy trên Windows chưa được ký số, nên SmartScreen sẽ hiện cảnh báo ở lần chạy đầu tiên.
 
 ### macOS
 
-Ứng dụng chưa được ký và chưa được Apple công chứng (notarize), nên Gatekeeper sẽ chặn. Hãy cho phép riêng file này:
+Bản phát hành được ký bằng Developer ID và được Apple công chứng (notarize) khi các secret ký của maintainer có sẵn, nên chỉ cần:
 
 ```bash
 chmod +x ./codex-setup-macos-arm64
-xattr -d com.apple.quarantine ./codex-setup-macos-arm64
 ./codex-setup-macos-arm64
+```
+
+Nếu bản build chưa được ký và Gatekeeper chặn, hãy cho phép riêng file này (`xattr -d` trả về mã 1 khi thuộc tính không tồn tại, nên đừng nối bằng `&&`):
+
+```bash
+chmod +x ./codex-setup-macos-arm64
+xattr -d com.apple.quarantine ./codex-setup-macos-arm64 2>/dev/null; ./codex-setup-macos-arm64
 ```
 
 Cách khác: trong Finder, bấm chuột phải vào file, chọn Open (Mở), rồi xác nhận Open. Đừng tắt Gatekeeper cho toàn bộ máy.
@@ -220,11 +226,23 @@ python scripts/build.py --smoke
 
 File chạy và file `.sha256` được ghi vào thư mục `dist/`. Bản build chỉ dành cho hệ điều hành và kiến trúc hiện tại.
 
+## Ký số (maintainer)
+
+Các job macOS trên CI ký bằng chứng chỉ Developer ID Application và công chứng file chạy khi có secret `MACOS_CERT_P12`. Nếu không có, chúng build bản không ký. Các secret của repository:
+
+- `MACOS_CERT_P12`: base64 của file `.p12` Developer ID Application
+- `MACOS_CERT_PASSWORD`: mật khẩu của file `.p12` đó
+- `APPLE_API_KEY_P8`: nội dung khóa API App Store Connect (`.p8`)
+- `APPLE_API_KEY_ID`: key ID của khóa API đó
+- `APPLE_API_ISSUER_ID`: issuer ID của team App Store Connect
+
+Chạy cục bộ: `python scripts/build.py --codesign-identity "<identity>"` (hoặc biến môi trường `MACOS_SIGN_IDENTITY`). Dùng `-` cho chữ ký ad-hoc. Công chứng bằng `scripts/notarize_macos.sh <binary>`.
+
 ## Hạn chế đã biết / chưa được xác minh
 
 - Mở ứng dụng Desktop kèm khóa API (`launch app`) là tính năng thử nghiệm. Chưa xác minh được rằng ứng dụng Desktop khởi động theo cách này luôn kế thừa biến môi trường.
 - Việc phát hiện Desktop trên Windows có thể bỏ sót bản cài từ Microsoft Store; "not detected" không phải lúc nào cũng có nghĩa là chưa cài.
-- File chạy chưa được ký số hoặc công chứng (có cảnh báo của macOS Gatekeeper và Windows SmartScreen).
+- File chạy Windows chưa được ký (có cảnh báo SmartScreen). File chạy macOS chỉ được ký và công chứng khi đã cấu hình các secret ký.
 
 ## Giấy phép
 

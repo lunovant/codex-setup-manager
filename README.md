@@ -45,16 +45,22 @@ The Linux Desktop app is a preview, available for Ubuntu 24.04/26.04, Debian 13,
 
 ## First run
 
-The binaries are not code-signed yet, so your OS shows a warning the first time.
+Windows binaries are not code-signed, so SmartScreen shows a warning the first time.
 
 ### macOS
 
-The app is not signed or notarized yet, so Gatekeeper blocks it. Allow this one file only:
+Release binaries are signed with a Developer ID and notarized by Apple when the maintainers' signing secrets are available, so this is enough:
 
 ```bash
 chmod +x ./codex-setup-macos-arm64
-xattr -d com.apple.quarantine ./codex-setup-macos-arm64
 ./codex-setup-macos-arm64
+```
+
+If a build is unsigned and Gatekeeper blocks it, allow this one file only (`xattr -d` exits with 1 when the attribute is missing, so do not chain it with `&&`):
+
+```bash
+chmod +x ./codex-setup-macos-arm64
+xattr -d com.apple.quarantine ./codex-setup-macos-arm64 2>/dev/null; ./codex-setup-macos-arm64
 ```
 
 Alternative: in Finder, right-click the file, choose Open, then confirm Open. Do not turn Gatekeeper off for your whole Mac.
@@ -220,11 +226,23 @@ python scripts/build.py --smoke
 
 The binary and a `.sha256` file are written to `dist/`. Builds are for the current OS and architecture only.
 
+## Signing (maintainers)
+
+The macOS CI jobs sign with a Developer ID Application certificate and notarize the binary when `MACOS_CERT_P12` is set. Without it they build unsigned. Repository secrets:
+
+- `MACOS_CERT_P12`: base64 of a Developer ID Application `.p12`
+- `MACOS_CERT_PASSWORD`: password of that `.p12`
+- `APPLE_API_KEY_P8`: content of the App Store Connect API key `.p8`
+- `APPLE_API_KEY_ID`: key ID of that API key
+- `APPLE_API_ISSUER_ID`: issuer ID of the App Store Connect team
+
+Locally: `python scripts/build.py --codesign-identity "<identity>"` (or env `MACOS_SIGN_IDENTITY`). Use `-` for an ad-hoc signature. Notarize with `scripts/notarize_macos.sh <binary>`.
+
 ## Known limitations / not yet verified
 
 - Launching the Desktop app with the key injected (`launch app`) is experimental. It is not verified that a Desktop app started this way always inherits the environment.
 - Windows Desktop detection may miss Microsoft Store installs; "not detected" does not always mean not installed.
-- Binaries are not signed or notarized yet (macOS Gatekeeper and Windows SmartScreen warnings).
+- Windows binaries are not signed (SmartScreen warning). macOS binaries are signed and notarized only when the signing secrets are configured.
 
 ## License
 

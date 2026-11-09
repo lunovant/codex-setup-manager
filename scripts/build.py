@@ -3,6 +3,7 @@
 
 Usage:
     python scripts/build.py [--smoke] [--skip-build]
+                            [--codesign-identity NAME] [--entitlements PATH]
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import os
 import platform
 import subprocess
 import sys
@@ -20,6 +22,7 @@ ENTRY = ROOT / "scripts" / "entry.py"
 SRC = ROOT / "src"
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
+DEFAULT_ENTITLEMENTS = ROOT / "scripts" / "entitlements.plist"
 
 HIDDEN_IMPORTS = (
     "keyring.backends.macOS",
@@ -67,7 +70,7 @@ def _module_exists(name: str) -> bool:
         return False
 
 
-def build_command(name: str) -> list[str]:
+def build_command(name: str, identity: str | None = None, entitlements: Path | None = None) -> list[str]:
     stem = name[:-4] if name.endswith(".exe") else name
     cmd = [
         sys.executable,
@@ -92,8 +95,27 @@ def build_command(name: str) -> list[str]:
             cmd += ["--collect-submodules", mod]
     for mod in HIDDEN_IMPORTS:
         cmd += ["--hidden-import", mod]
+    if identity:
+        # Onefile embedded binaries can only be signed during the build itself.
+        cmd += ["--codesign-identity", identity]
+        if entitlements:
+            cmd += ["--osx-entitlements-file", str(entitlements)]
     cmd.append(str(ENTRY))
     return cmd
+
+
+def codesign(exe: Path, identity: str, entitlements: Path) -> None:
+    """Re-sign the final executable (hardened runtime) and verify it."""
+    sign = ["codesign", "--force"]
+    if identity != "-":
+        sign.append("--timestamp")
+    sign += ["--options", "runtime", "--entitlements", str(entitlements), "--sign", identity, str(exe)]
+    subprocess.run(sign, check=True)
+    subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", str(exe)], check=True)
+    info = subprocess.run(["codesign", "-dv", str(exe)], capture_output=True, text=True, check=True)
+    for line in (info.stdout + info.stderr).splitlines():
+        if line.startswith(("Authority=", "TeamIdentifier=")):
+            print(line)
 
 
 def write_sha256(path: Path) -> Path:
@@ -120,17 +142,35 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the Codex Setup Manager executable for this OS/arch.")
     parser.add_argument("--smoke", action="store_true", help="run '--version' and 'status --help' on the built binary")
     parser.add_argument("--skip-build", action="store_true", help="skip PyInstaller (only checksum/smoke an existing binary)")
+    parser.add_argument(
+        "--codesign-identity",
+        default=os.environ.get("MACOS_SIGN_IDENTITY") or None,
+        help="macOS signing identity ('-' for ad-hoc); default: env MACOS_SIGN_IDENTITY; ignored off macOS",
+    )
+    parser.add_argument(
+        "--entitlements",
+        type=Path,
+        default=None,
+        help="entitlements plist (default: scripts/entitlements.plist when signing)",
+    )
     args = parser.parse_args(argv)
+
+    identity = args.codesign_identity if sys.platform == "darwin" else None
+    entitlements = (args.entitlements or DEFAULT_ENTITLEMENTS) if identity else None
+    if entitlements and not entitlements.is_file():
+        raise SystemExit(f"entitlements file not found: {entitlements}")
 
     name = exe_name()
     target = DIST / name
     if not args.skip_build:
         DIST.mkdir(parents=True, exist_ok=True)
-        subprocess.run(build_command(name), cwd=ROOT, check=True)
+        subprocess.run(build_command(name, identity, entitlements), cwd=ROOT, check=True)
     if not target.is_file():
         raise SystemExit(f"expected build output not found: {target}")
     if not sys.platform.startswith("win"):
         target.chmod(target.stat().st_mode | 0o111)
+    if identity and entitlements:
+        codesign(target, identity, entitlements)
     checksum = write_sha256(target)
     print(f"built: {target}\nsha256 file: {checksum}")
     if args.smoke:
