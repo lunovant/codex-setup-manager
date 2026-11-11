@@ -62,8 +62,12 @@ if [[ "$status" != "Accepted" ]]; then
 fi
 
 if [[ "$is_app" -eq 1 ]]; then
-  xcrun stapler staple "$binary"
-  xcrun stapler validate "$binary"
+  # Stapling talks to Apple's ticket CDN, which occasionally drops the connection; retry.
+  for attempt in 1 2 3; do
+    if xcrun stapler staple "$binary" && xcrun stapler validate "$binary"; then break; fi
+    [[ "$attempt" -lt 3 ]] || { echo "stapling failed after 3 attempts" >&2; exit 1; }
+    sleep $((attempt * 15))
+  done
   case "$(uname -m)" in
     arm64) arch=arm64 ;;
     x86_64) arch=x64 ;;
