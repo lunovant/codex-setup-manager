@@ -29,6 +29,16 @@ Base URL: `https://api.lunovant.tech`. API endpoint: `https://api.lunovant.tech/
 
 The Linux Desktop app is a preview, available for Ubuntu 24.04/26.04, Debian 13, Fedora 43/44 and Arch. Codex Setup Manager itself needs Codex to be installed separately.
 
+## Desktop app
+
+Codex Setup Manager now has a desktop window (no terminal needed):
+
+- **macOS**: download `codex-setup-macos-arm64-app.zip` (Apple Silicon) or `codex-setup-macos-x64-app.zip` (Intel), unzip it, drag **Codex Setup.app** to Applications, then open it. The app is signed and notarized.
+- **Windows**: double-click `codex-setup-windows-x64.exe`. It needs Microsoft Edge WebView2, which is preinstalled on Windows 10/11. If it is missing, install the [Evergreen runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+- **Linux**: the `codex-setup-linux-x64` binary opens a window when GTK and WebKit2GTK are installed (Ubuntu desktop). Otherwise it falls back to the text menu.
+
+The command line is still available: `codex-setup <command>`, or `codex-setup --tui` for the text menu.
+
 ## Download
 
 1. Open the project's GitHub Releases page and download the file for your system:

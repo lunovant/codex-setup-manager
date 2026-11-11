@@ -29,6 +29,16 @@ Base URL: `https://api.lunovant.tech`. Endpoint API: `https://api.lunovant.tech/
 
 Ứng dụng Desktop trên Linux là bản preview, dành cho Ubuntu 24.04/26.04, Debian 13, Fedora 43/44 và Arch. Bạn cần cài Codex riêng; Codex Setup Manager không cài Codex thay bạn.
 
+## Ứng dụng Desktop
+
+Codex Setup Manager nay có cửa sổ ứng dụng (không cần dùng terminal):
+
+- **macOS**: tải `codex-setup-macos-arm64-app.zip` (Apple Silicon) hoặc `codex-setup-macos-x64-app.zip` (Intel), giải nén, kéo **Codex Setup.app** vào Applications rồi mở. Ứng dụng đã được ký và công chứng (notarize).
+- **Windows**: bấm đúp vào `codex-setup-windows-x64.exe`. Cần Microsoft Edge WebView2, đã cài sẵn trên Windows 10/11. Nếu thiếu, cài [Evergreen runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+- **Linux**: file `codex-setup-linux-x64` mở cửa sổ khi máy có GTK và WebKit2GTK (Ubuntu desktop). Nếu không, nó dùng menu văn bản.
+
+Vẫn dùng được dòng lệnh: `codex-setup <lệnh>`, hoặc `codex-setup --tui` cho menu văn bản.
+
 ## Tải về
 
 1. Mở trang GitHub Releases của dự án và tải file phù hợp với máy của bạn:

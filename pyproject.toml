@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codex-setup-manager"
-version = "0.1.1"
+version = "0.2.0"
 description = "Configure OpenAI Codex (CLI and Desktop) to use a third-party OpenAI-compatible provider such as Lunovant."
 readme = "README.md"
 license = "MIT"
@@ -22,6 +22,8 @@ dev = [
   "pytest>=8.0",
   "pyinstaller>=6.10",
 ]
+# Only installed in the Linux CI job so the frozen binary can use GTK + WebKit2GTK.
+linux-gui = ["PyGObject>=3.46"]
 
 [project.scripts]
 codex-setup = "codex_setup.main:main"

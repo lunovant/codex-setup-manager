@@ -42,6 +42,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Linux GUI runtime (GTK + WebKit2GTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgirepository1.0-dev libcairo2-dev pkg-config \
+            gir1.2-webkit2-4.0 libwebkit2gtk-4.0-37
+          python -m pip install -e ".[linux-gui]"
+
       - name: Test
         run: python -m pytest -q
 
@@ -113,6 +121,39 @@ jobs:
           fi
           rm -f "$copy"
 
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        run: python scripts/build.py --app --smoke
+
+      - name: Notarize app
+        if: runner.os == 'macOS' && env.MACOS_SIGNING == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: scripts/notarize_macos.sh "dist/Codex Setup.app"
+
+      - name: Gatekeeper check (app)
+        if: runner.os == 'macOS' && env.MACOS_SIGNING == 'true'
+        run: |
+          set -euo pipefail
+          zip="$(ls dist/codex-setup-macos-*-app.zip | head -n 1)"
+          work="$RUNNER_TEMP/gatekeeper-app"
+          rm -rf "$work"
+          mkdir -p "$work"
+          cp "$zip" "$work/app.zip"
+          xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$work/app.zip"
+          ditto -x -k "$work/app.zip" "$work/out"
+          app="$work/out/Codex Setup.app"
+          spctl --assess --type execute -vv "$app" 2>&1 | tee "$work/spctl.txt"
+          grep -q "accepted" "$work/spctl.txt"
+          out="$(perl -e 'alarm 60; exec @ARGV' "$app/Contents/MacOS/Codex Setup" --version)"
+          echo "$out"
+          if [ -z "$out" ]; then
+            echo "::error::Quarantined app did not print a version"
+            exit 1
+          fi
+          rm -rf "$work"
+
       - name: Clean up signing material
         if: always() && runner.os == 'macOS'
         run: |
@@ -125,6 +166,15 @@ jobs:
           path: |
             dist/${{ matrix.artifact }}
             dist/${{ matrix.artifact }}.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'macOS'
+        with:
+          name: ${{ matrix.artifact }}-app
+          path: |
+            dist/${{ matrix.artifact }}-app.zip
+            dist/${{ matrix.artifact }}-app.zip.sha256
           if-no-files-found: error
 
   release:
