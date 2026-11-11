@@ -1,4 +1,4 @@
-"""Command line entry point. No arguments opens the Rich TUI."""
+"""Command line entry point. No arguments opens the desktop GUI (or the Rich TUI)."""
 
 from __future__ import annotations
 
@@ -40,6 +40,9 @@ def _common() -> argparse.ArgumentParser:
     p.add_argument("--lang", choices=["en", "vi"], help="interface language")
     p.add_argument("--yes", "-y", action="store_true", help="skip confirmations")
     p.add_argument("--dry-run", action="store_true", help="show the diff, write nothing")
+    ui = p.add_mutually_exclusive_group()
+    ui.add_argument("--gui", action="store_true", help="open the desktop GUI (no subcommand)")
+    ui.add_argument("--tui", action="store_true", help="open the terminal menu (no subcommand)")
     return p
 
 
@@ -100,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("env", "opt-in persistent environment variable")
     p.add_argument("action", choices=["install", "remove"])
+
+    sub.add_parser("gui-selftest", help=argparse.SUPPRESS, parents=[common])
 
     p = add("uninstall", "restore the original configuration")
     p.add_argument("--delete-key", action="store_true", help="also delete the stored key")
@@ -438,7 +443,29 @@ _HANDLERS: dict[str, Callable[[SetupService, argparse.Namespace], int]] = {
     "launch": _cmd_launch,
     "env": _cmd_env,
     "uninstall": _cmd_uninstall,
+    "gui-selftest": lambda svc, ns: _cmd_gui_selftest(),
 }
+
+
+def gui_available() -> tuple[bool, str]:
+    try:
+        from codex_setup.gui.app import gui_available as check
+
+        return check()
+    except Exception as exc:  # broken optional dependency must not break the CLI
+        return False, f"{exc.__class__.__name__}: {exc}"
+
+
+def run_gui(lang: str | None = None) -> int:
+    from codex_setup.gui.app import run_gui as run
+
+    return run(lang)
+
+
+def _cmd_gui_selftest() -> int:
+    ok, info = gui_available()
+    _out(f"gui ok {info}" if ok else f"gui unavailable: {info}")
+    return 0 if ok else 1
 
 
 def _force_utf8() -> None:
@@ -470,8 +497,17 @@ def main(argv: list[str] | None = None) -> int:
             setattr(ns, name, False)
 
     try:
+        if ns.command == "gui-selftest":
+            return _cmd_gui_selftest()
         svc = make_service()
         if ns.command is None:
+            if getattr(ns, "gui", False):
+                ok, info = gui_available()
+                if not ok:
+                    raise CodexSetupError(f"GUI unavailable: {info}")
+                return run_gui(getattr(ns, "lang", None))
+            if not getattr(ns, "tui", False) and gui_available()[0]:
+                return run_gui(getattr(ns, "lang", None))
             if sys.stdin.isatty() and sys.stdout.isatty():
                 from codex_setup.ui import tui
 

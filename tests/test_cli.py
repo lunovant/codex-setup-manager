@@ -55,7 +55,7 @@ def test_status_missing(svc, capsys):
 
 def test_no_args_not_tty_prints_hint(svc, capsys, monkeypatch):
     _stdin(monkeypatch, "")
-    assert cli.main(["--lang", "en"]) == 0
+    assert cli.main(["--lang", "en", "--tui"]) == 0
     out = capsys.readouterr().out
     assert "codex-setup --help" in out
 

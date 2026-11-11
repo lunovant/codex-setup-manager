@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- pywebview's JS bridge evaluates code it injects, so script-src needs 'unsafe-eval'; only packaged local files are loaded. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data:">
+
+<title>Codex Setup Manager</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="card" id="header" aria-live="polite">
+  <div class="hdr-top">
+    <h1>Codex Setup Manager</h1>
+    <div class="hdr-actions">
+      <button id="refresh" type="button" data-i18n="g_refresh">Refresh</button>
+      <label for="lang"><span data-i18n="g_lang">Language</span></label>
+      <select id="lang"><option value="vi">Tiếng Việt</option><option value="en">English</option></select>
+    </div>
+  </div>
+  <dl id="status" class="status-grid"></dl>
+</header>
+
+<div class="layout">
+  <nav id="nav" role="tablist" aria-orientation="vertical">
+    <button role="tab" data-tab="quick" data-i18n="g_nav_quick" aria-selected="true"></button>
+    <button role="tab" data-tab="model" data-i18n="g_nav_model"></button>
+    <button role="tab" data-tab="api" data-i18n="g_nav_api"></button>
+    <button role="tab" data-tab="test" data-i18n="g_nav_test"></button>
+    <button role="tab" data-tab="sandbox" data-i18n="g_nav_sandbox" id="nav-sandbox" hidden></button>
+    <button role="tab" data-tab="backup" data-i18n="g_nav_backup"></button>
+    <button role="tab" data-tab="diag" data-i18n="g_nav_diag"></button>
+    <button role="tab" data-tab="launch" data-i18n="g_nav_launch"></button>
+    <button role="tab" data-tab="uninstall" data-i18n="g_nav_uninstall"></button>
+  </nav>
+
+  <main>
+    <div id="message" role="status" aria-live="polite" class="message" hidden></div>
+
+    <section id="tab-quick" role="tabpanel" class="panel">
+      <h2 data-i18n="g_nav_quick"></h2>
+      <div class="field"><label for="q-url" data-i18n="qs_base_url"></label>
+        <input id="q-url" type="text" value="https://api.lunovant.tech/v1" autocomplete="off"></div>
+      <div class="field"><label for="q-model" data-i18n="qs_model"></label>
+        <select id="q-model"></select></div>
+      <div class="field"><label for="q-key" data-i18n="g_key_label"></label>
+        <input id="q-key" type="password" autocomplete="off" spellcheck="false">
+        <p class="hint" data-i18n="g_key_hint"></p></div>
+      <div class="field"><label for="q-backend" data-i18n="g_backend_label"></label>
+        <select id="q-backend">
+          <option value="auto" data-i18n="g_backend_auto"></option>
+          <option value="keyring" data-i18n="g_backend_keyring"></option>
+          <option value="session" data-i18n="g_backend_session"></option>
+          <option value="file" data-i18n="g_backend_file"></option>
+        </select></div>
+      <div id="q-file-warn" class="warn-box" hidden>
+        <p data-i18n="file_warn"></p>
+        <label class="inline"><input type="checkbox" id="q-file-ok"> <span data-i18n="g_file_confirm_box"></span></label>
+      </div>
+      <div class="row">
+        <button id="q-preview" type="button" data-i18n="g_preview"></button>
+        <button id="q-apply" type="button" class="primary" data-i18n="g_apply" disabled></button>
+      </div>
+      <h3 data-i18n="g_diff_title"></h3>
+      <pre id="q-diff" class="diff" tabindex="0"></pre>
+    </section>
+
+    <section id="tab-model" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_model"></h2>
+      <p><span data-i18n="g_model_current"></span>: <strong id="m-current"></strong></p>
+      <div class="field"><label for="m-select" data-i18n="g_model_select"></label><select id="m-select"></select></div>
+      <div class="field"><label for="m-custom" data-i18n="g_model_custom"></label>
+        <input id="m-custom" type="text" autocomplete="off"></div>
+      <div class="row">
+        <button id="m-preview" type="button" data-i18n="g_preview"></button>
+        <button id="m-apply" type="button" class="primary" data-i18n="g_apply" disabled></button>
+      </div>
+      <pre id="m-diff" class="diff" tabindex="0"></pre>
+    </section>
+
+    <section id="tab-api" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_api"></h2>
+      <div class="field"><label for="a-url" data-i18n="qs_base_url"></label>
+        <input id="a-url" type="text" autocomplete="off"></div>
+      <div class="field"><label for="a-key" data-i18n="g_key_label"></label>
+        <input id="a-key" type="password" autocomplete="off" spellcheck="false">
+        <p class="hint" data-i18n="g_key_hint"></p></div>
+      <label class="inline"><input type="checkbox" id="a-delete"> <span data-i18n="g_delete_key"></span></label>
+      <div class="row">
+        <button id="a-preview" type="button" data-i18n="g_preview"></button>
+        <button id="a-apply" type="button" class="primary" data-i18n="g_apply" disabled></button>
+      </div>
+      <pre id="a-diff" class="diff" tabindex="0"></pre>
+    </section>
+
+    <section id="tab-test" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_test"></h2>
+      <div class="field"><label for="t-model" data-i18n="test_model"></label>
+        <input id="t-model" type="text" autocomplete="off"></div>
+      <div class="row"><button id="t-run" type="button" class="primary" data-i18n="g_run_test"></button></div>
+      <table id="t-table" class="table" hidden>
+        <thead><tr><th scope="col" data-i18n="g_col_step"></th><th scope="col" data-i18n="g_col_result"></th>
+          <th scope="col" data-i18n="g_col_problem"></th><th scope="col" data-i18n="g_col_detail"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="t-overall" class="overall"></p>
+    </section>
+
+    <section id="tab-sandbox" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_sandbox"></h2>
+      <p><span data-i18n="g_sb_current"></span>: <strong id="s-current"></strong></p>
+      <pre id="s-explain" class="explain"></pre>
+      <div class="row">
+        <button id="s-unelevated" type="button" class="primary" data-i18n="g_sb_unelevated"></button>
+        <button id="s-elevated" type="button" data-i18n="g_sb_elevated"></button>
+        <button id="s-remove" type="button" data-i18n="g_sb_remove"></button>
+      </div>
+      <pre id="s-diff" class="diff" tabindex="0"></pre>
+      <div class="row">
+        <button id="s-apply" type="button" class="primary" data-i18n="g_apply" disabled></button>
+      </div>
+    </section>
+
+    <section id="tab-backup" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_backup"></h2>
+      <div class="row">
+        <button id="b-create" type="button" data-i18n="g_bk_create"></button>
+        <button id="b-original" type="button" data-i18n="g_bk_original"></button>
+      </div>
+      <table id="b-table" class="table">
+        <thead><tr><th scope="col" data-i18n="bk_id"></th><th scope="col" data-i18n="bk_created"></th>
+          <th scope="col" data-i18n="bk_reason"></th><th scope="col"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="b-none" data-i18n="g_bk_none"></p>
+      <pre id="b-diff" class="diff" tabindex="0"></pre>
+      <div class="row"><button id="b-apply" type="button" class="primary" data-i18n="g_apply" disabled></button></div>
+    </section>
+
+    <section id="tab-diag" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_diag"></h2>
+      <div class="field"><label for="d-text" data-i18n="g_diag_paste"></label>
+        <textarea id="d-text" rows="5"></textarea></div>
+      <div class="row">
+        <button id="d-explain" type="button" class="primary" data-i18n="g_diag_explain"></button>
+        <button id="d-run" type="button" data-i18n="g_diag_run"></button>
+      </div>
+      <div id="d-out"></div>
+    </section>
+
+    <section id="tab-launch" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_launch"></h2>
+      <p data-i18n="g_launch_note"></p>
+      <p class="hint" data-i18n="ln_app_experimental"></p>
+      <div class="row">
+        <button id="l-cli" type="button" class="primary" data-i18n="g_launch_cli"></button>
+        <button id="l-app" type="button" data-i18n="g_launch_app"></button>
+      </div>
+      <h3 data-i18n="g_env_install"></h3>
+      <div class="warn-box"><p id="l-env-warn"></p>
+        <label class="inline"><input type="checkbox" id="l-consent"> <span data-i18n="g_env_consent"></span></label></div>
+      <div class="row">
+        <button id="l-env-install" type="button" data-i18n="g_env_install"></button>
+        <button id="l-env-remove" type="button" data-i18n="g_env_remove"></button>
+      </div>
+    </section>
+
+    <section id="tab-uninstall" role="tabpanel" class="panel" hidden>
+      <h2 data-i18n="g_nav_uninstall"></h2>
+      <p data-i18n="un_info"></p>
+      <label class="inline"><input type="checkbox" id="u-delete"> <span data-i18n="g_uninstall_delete_key"></span></label>
+      <div class="row">
+        <button id="u-preview" type="button" data-i18n="g_preview"></button>
+        <button id="u-apply" type="button" class="danger" data-i18n="g_uninstall_btn" disabled></button>
+      </div>
+      <pre id="u-diff" class="diff" tabindex="0"></pre>
+    </section>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
