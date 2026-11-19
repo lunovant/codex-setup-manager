@@ -1,6 +1,6 @@
-# Codex Setup Manager: architecture contract (source for docs/ARCHITECTURE.md)
+# Lunovant Setup: architecture contract (source for docs/ARCHITECTURE.md)
 
-Codex Setup Manager edits the user's Codex configuration (`$CODEX_HOME/config.toml`) so Codex
+Lunovant Setup edits the user's Codex configuration (`$CODEX_HOME/config.toml`) so Codex
 CLI / Desktop talk to a third-party OpenAI-compatible provider (default: Lunovant), stores the
 provider API key in the OS secret store, and launches Codex with the key injected as an
 environment variable. Python 3.11+, deps: rich, tomlkit, httpx, keyring (pyproject.toml exists).
@@ -306,7 +306,7 @@ def run_checks(ctx) -> list[CheckResult]
 ```
 Checks: config exists/parses (ConfigParseError line/col); model_provider set and its
 [model_providers.<id>] defined (unless builtin); provider has env_key; env var present in the
-current environment (WARN if missing but stored in the secret store: "use `codex-setup launch`"
+current environment (WARN if missing but stored in the secret store: "use `lunovant-setup launch`"
 or `env install`); secret stored; codex CLI found; Desktop status note; Windows: sandbox mode and
 tail of `$CODEX_HOME/.sandbox/sandbox.log` scanned for errors (last 200 lines, redacted);
 last API test result from state.
@@ -326,12 +326,12 @@ model_not_found (404 / "model not found" / "does not exist"), rate_limited (429)
 responses_incompatible, invalid_config ("config.toml" + parse/invalid), env_missing ("environment
 variable" + missing/not set, `LUNOVANT_API_KEY`), codex_not_found ("codex: command not found",
 "not recognized as an internal or external command"). Windows sandbox issues: suggest
-`codex-setup sandbox unelevated`, explain elevated vs unelevated, never disable the sandbox,
+`lunovant-setup sandbox unelevated`, explain elevated vs unelevated, never disable the sandbox,
 never touch Defender/UAC, mention `$CODEX_HOME/.sandbox/sandbox.log`.
 
 ## UI / CLI (main.py, ui/)
 
-`codex-setup` with no args opens the Rich TUI: header panel (OS, Codex CLI version, Desktop
+`lunovant-setup` with no args opens the Rich TUI: header panel (OS, Codex CLI version, Desktop
 status, active model/provider, config status, last API test, masked key) and menu:
 1 Quick Setup, 2 Change Model, 3 API Settings, 4 Test Connection, 5 Windows Sandbox Fix (only
 shown on Windows), 6 Backup & Restore, 7 Diagnostics, 8 Profiles, 9 Uninstall Configuration,

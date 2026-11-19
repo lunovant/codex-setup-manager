@@ -1,4 +1,4 @@
-"""PyInstaller entry point for Codex Setup Manager."""
+"""PyInstaller entry point for Lunovant Setup."""
 
 from codex_setup.main import main
 

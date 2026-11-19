@@ -7,6 +7,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+# legacy name kept on purpose: renaming loses existing user state
 APP_DIR_NAME = "codex-setup-manager"
 
 

@@ -24,16 +24,16 @@ _SANDBOX_VI = (
     "phê duyệt. Chế độ `unelevated` dùng token bị giới hạn của chính tài khoản bạn, không cần quyền admin."
 )
 _SANDBOX_STEPS_EN = [
-    "Try `codex-setup sandbox unelevated` first, then restart Codex.",
+    "Try `lunovant-setup sandbox unelevated` first, then restart Codex.",
     "Use `elevated` only if an administrator can approve its one-time setup.",
     "This tool never disables the sandbox and never touches Defender, UAC or admin settings.",
-    "Check $CODEX_HOME/.sandbox/sandbox.log for details (run `codex-setup diagnose`).",
+    "Check $CODEX_HOME/.sandbox/sandbox.log for details (run `lunovant-setup diagnose`).",
 ]
 _SANDBOX_STEPS_VI = [
-    "Hãy thử `codex-setup sandbox unelevated` trước, rồi khởi động lại Codex.",
+    "Hãy thử `lunovant-setup sandbox unelevated` trước, rồi khởi động lại Codex.",
     "Chỉ dùng `elevated` khi có quản trị viên phê duyệt thiết lập một lần của nó.",
     "Công cụ này không bao giờ tắt sandbox và không đụng tới Defender, UAC hay quyền admin.",
-    "Xem chi tiết trong $CODEX_HOME/.sandbox/sandbox.log (chạy `codex-setup diagnose`).",
+    "Xem chi tiết trong $CODEX_HOME/.sandbox/sandbox.log (chạy `lunovant-setup diagnose`).",
 ]
 
 ISSUES: tuple[KnownIssue, ...] = (
@@ -50,9 +50,9 @@ ISSUES: tuple[KnownIssue, ...] = (
         },
         {
             "en": ["Start a new thread/session after switching provider.",
-                   "Verify `model_provider` in config.toml with `codex-setup status`."],
+                   "Verify `model_provider` in config.toml with `lunovant-setup status`."],
             "vi": ["Hãy tạo thread/session mới sau khi đổi provider.",
-                   "Kiểm tra `model_provider` trong config.toml bằng `codex-setup status`."],
+                   "Kiểm tra `model_provider` trong config.toml bằng `lunovant-setup status`."],
         },
     ),
     KnownIssue(
@@ -85,12 +85,12 @@ ISSUES: tuple[KnownIssue, ...] = (
                   + _SANDBOX_VI,
         },
         {
-            "en": ["Run `codex-setup test` to check URL, key and model.",
+            "en": ["Run `lunovant-setup test` to check URL, key and model.",
                    "Start a new thread if you switched provider.",
-                   "On Windows, try `codex-setup sandbox unelevated` first (the tool never disables the sandbox)."],
-            "vi": ["Chạy `codex-setup test` để kiểm tra URL, key và model.",
+                   "On Windows, try `lunovant-setup sandbox unelevated` first (the tool never disables the sandbox)."],
+            "vi": ["Chạy `lunovant-setup test` để kiểm tra URL, key và model.",
                    "Tạo thread mới nếu bạn vừa đổi provider.",
-                   "Trên Windows, thử `codex-setup sandbox unelevated` trước (công cụ không tắt sandbox)."],
+                   "Trên Windows, thử `lunovant-setup sandbox unelevated` trước (công cụ không tắt sandbox)."],
         },
     ),
     KnownIssue(
@@ -99,9 +99,9 @@ ISSUES: tuple[KnownIssue, ...] = (
         {"en": "401 Unauthorized", "vi": "401 Không được phép"},
         {"en": "The provider rejected the API key.", "vi": "Nhà cung cấp từ chối API key."},
         {
-            "en": ["Re-enter the key with `codex-setup api --key-stdin`.",
+            "en": ["Re-enter the key with `lunovant-setup api --key-stdin`.",
                    "Make sure the key belongs to this provider and has not been revoked."],
-            "vi": ["Nhập lại key bằng `codex-setup api --key-stdin`.",
+            "vi": ["Nhập lại key bằng `lunovant-setup api --key-stdin`.",
                    "Đảm bảo key thuộc đúng provider này và chưa bị thu hồi."],
         },
     ),
@@ -113,9 +113,9 @@ ISSUES: tuple[KnownIssue, ...] = (
          "vi": "Key hợp lệ nhưng không có quyền truy cập endpoint hoặc model này."},
         {
             "en": ["Check the key's permissions and plan in the provider dashboard.",
-                   "Try another model with `codex-setup model`."],
+                   "Try another model with `lunovant-setup model`."],
             "vi": ["Kiểm tra quyền và gói của key trong trang quản lý của provider.",
-                   "Thử model khác bằng `codex-setup model`."],
+                   "Thử model khác bằng `lunovant-setup model`."],
         },
     ),
     KnownIssue(
@@ -125,9 +125,9 @@ ISSUES: tuple[KnownIssue, ...] = (
         {"en": "The provider does not know this model name, or the URL is wrong.",
          "vi": "Provider không biết tên model này, hoặc URL bị sai."},
         {
-            "en": ["Pick a listed model with `codex-setup model`.",
+            "en": ["Pick a listed model with `lunovant-setup model`.",
                    "Check that the base URL ends with /v1."],
-            "vi": ["Chọn model có trong danh sách bằng `codex-setup model`.",
+            "vi": ["Chọn model có trong danh sách bằng `lunovant-setup model`.",
                    "Kiểm tra base URL có kết thúc bằng /v1."],
         },
     ),
@@ -149,9 +149,9 @@ ISSUES: tuple[KnownIssue, ...] = (
         {"en": "Codex needs a streaming OpenAI Responses API. The provider does not offer it at this URL.",
          "vi": "Codex cần API Responses kiểu OpenAI có hỗ trợ streaming. Provider không cung cấp tại URL này."},
         {
-            "en": ["Run `codex-setup test` to see which step fails.",
+            "en": ["Run `lunovant-setup test` to see which step fails.",
                    "Check the base URL (usually ends with /v1) and that wire_api = \"responses\"."],
-            "vi": ["Chạy `codex-setup test` để xem bước nào lỗi.",
+            "vi": ["Chạy `lunovant-setup test` để xem bước nào lỗi.",
                    "Kiểm tra base URL (thường kết thúc bằng /v1) và wire_api = \"responses\"."],
         },
     ),
@@ -162,8 +162,8 @@ ISSUES: tuple[KnownIssue, ...] = (
         {"en": "config.toml has a TOML syntax error, so Codex cannot read it.",
          "vi": "config.toml có lỗi cú pháp TOML nên Codex không đọc được."},
         {
-            "en": ["Fix the reported line, or restore a backup with `codex-setup backup list` / `restore`."],
-            "vi": ["Sửa dòng được báo lỗi, hoặc khôi phục bản sao lưu bằng `codex-setup backup list` / `restore`."],
+            "en": ["Fix the reported line, or restore a backup with `lunovant-setup backup list` / `restore`."],
+            "vi": ["Sửa dòng được báo lỗi, hoặc khôi phục bản sao lưu bằng `lunovant-setup backup list` / `restore`."],
         },
     ),
     KnownIssue(
@@ -174,10 +174,10 @@ ISSUES: tuple[KnownIssue, ...] = (
         {"en": "Codex reads the API key from an environment variable, and it is not set in this process.",
          "vi": "Codex đọc API key từ biến môi trường, nhưng biến này chưa được đặt trong tiến trình hiện tại."},
         {
-            "en": ["Start Codex with `codex-setup launch` (injects the key).",
-                   "Or opt in to `codex-setup env install` (stores the key in plaintext)."],
-            "vi": ["Khởi chạy Codex bằng `codex-setup launch` (tự truyền key).",
-                   "Hoặc chủ động dùng `codex-setup env install` (lưu key dạng văn bản thường)."],
+            "en": ["Start Codex with `lunovant-setup launch` (injects the key).",
+                   "Or opt in to `lunovant-setup env install` (stores the key in plaintext)."],
+            "vi": ["Khởi chạy Codex bằng `lunovant-setup launch` (tự truyền key).",
+                   "Hoặc chủ động dùng `lunovant-setup env install` (lưu key dạng văn bản thường)."],
         },
     ),
     KnownIssue(

@@ -1,4 +1,4 @@
-"""Exception hierarchy for Codex Setup Manager."""
+"""Exception hierarchy for Lunovant Setup."""
 
 from __future__ import annotations
 

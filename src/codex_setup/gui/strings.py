@@ -151,11 +151,11 @@ VI: dict[str, str] = {
 }
 
 EN["g_cli_needs_terminal"] = (
-    "Codex CLI needs a terminal. Open one and run `codex-setup launch`, or start the GUI "
+    "Codex CLI needs a terminal. Open one and run `lunovant-setup launch`, or start the GUI "
     "from a terminal."
 )
 VI["g_cli_needs_terminal"] = (
-    "Codex CLI cần một terminal. Hãy mở terminal và chạy `codex-setup launch`, hoặc mở GUI "
+    "Codex CLI cần một terminal. Hãy mở terminal và chạy `lunovant-setup launch`, hoặc mở GUI "
     "từ terminal."
 )
 

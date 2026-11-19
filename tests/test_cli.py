@@ -41,7 +41,7 @@ def _stdin(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
 
 def test_version(capsys):
     assert cli.main(["--version"]) == 0
-    assert capsys.readouterr().out.startswith("codex-setup ")
+    assert capsys.readouterr().out.startswith("lunovant-setup ")
 
 
 def test_no_key_option():
@@ -57,7 +57,7 @@ def test_no_args_not_tty_prints_hint(svc, capsys, monkeypatch):
     _stdin(monkeypatch, "")
     assert cli.main(["--lang", "en", "--tui"]) == 0
     out = capsys.readouterr().out
-    assert "codex-setup --help" in out
+    assert "lunovant-setup --help" in out
 
 
 def test_setup_writes_config_keeps_settings(svc, capsys, monkeypatch):

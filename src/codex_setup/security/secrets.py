@@ -12,6 +12,7 @@ from typing import Any
 from codex_setup.core import paths
 from codex_setup.core.errors import SecretStoreError
 
+# legacy name kept on purpose: renaming loses existing user state
 SERVICE = "codex-setup-manager"
 
 

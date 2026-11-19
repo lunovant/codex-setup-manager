@@ -2,21 +2,21 @@
 
 English | [Tiếng Việt](README.vi.md)
 
-Lunovant Setup (`codex-setup`) is an all-in-one configuration tool for **OpenAI Codex** and **Claude Code** to connect seamlessly to the Lunovant API. It safely configures your environment, stores credentials securely, verifies models, and allows side-by-side coexistence with your personal accounts.
+Lunovant Setup (`lunovant-setup`) is an all-in-one configuration tool for **OpenAI Codex** and **Claude Code** to connect seamlessly to the Lunovant API. It safely configures your environment, stores credentials securely, verifies models, and allows side-by-side coexistence with your personal accounts.
 
 The application automatically detects your key type:
 - **Orion key**: configures OpenAI Codex (CLI and Desktop app).
 - **Lyra key**: configures Claude Code (terminal and IDE extensions).
 - **Combo key (both)**: configures both Codex and Claude Code in a single click!
 
-*(Note: Repository and executable binary names remain `codex-setup-*` for compatibility).*
+*(Upgrading: if you used the old "Codex Setup" app, you can delete it after installing "Lunovant Setup.app". Your settings and saved keys are kept. The old `codex-setup` command still works as an alias.)*
 
 ---
 
 ## Quick start
 
 1. **Download**: Download the release package for your operating system from GitHub Releases ([see links below](#download)).
-2. **Open app**: Launch Lunovant Setup (`Codex Setup.app` on macOS, or double-click `codex-setup-windows-x64.exe` on Windows).
+2. **Open app**: Launch Lunovant Setup (`Lunovant Setup.app` on macOS, or double-click `lunovant-setup-windows-x64.exe` on Windows).
    > **Windows note**: On first launch, Windows SmartScreen will display **"Windows protected your PC"** because the executable is not yet code-signed. Click **More info**, then **Run anyway**. No administrator privileges are required.
 3. **Paste key**: Paste your Lunovant API key (Orion, Lyra, or combo) into the **Paste your Lunovant key** field.
 4. **Click "Install" & start working**: Click **Install** (**Cài đặt**). Lunovant Setup verifies your key, checks which product(s) your key supports, probes the working models, and writes the configuration safely with an automated backup. Once finished, launch your tool (Codex Desktop / CLI, or run `claude` in your terminal / IDE) and start coding!
@@ -71,7 +71,7 @@ If you already have a personal Claude account login (e.g. Pro or Max) on your ma
   - **Claude account (personal)**: Defaults to your personal Claude subscription. You can still use Lunovant at any time with `claude --settings ~/.claude/lunovant-settings.json`.
 - **How to switch**:
   - In the GUI: Click the mode selector toggle under the Claude Code section.
-  - In the CLI: Run `codex-setup mode lunovant --line claude` or `codex-setup mode personal --line claude`.
+  - In the CLI: Run `lunovant-setup mode lunovant --line claude` or `lunovant-setup mode personal --line claude`.
   - Restart your terminal or reload your IDE window after switching.
 - **Privacy**:
   - The application only checks whether a personal login exists (by checking for `oauthAccount` in `~/.claude.json`). It **never** reads, stores, logs, or transmits your actual credentials, access tokens, passwords, or personal account details from `.credentials.json` or the OS keychain.
@@ -90,7 +90,7 @@ If you already use a personal ChatGPT account with Codex, you can use both side-
   - **ChatGPT account**: Everything defaults to your personal ChatGPT account. Lunovant remains accessible anytime via `codex -p lunovant` in the terminal.
 - **How to switch**:
   - In the GUI: Click the mode toggle (**Lunovant** / **ChatGPT account**) in the **Current mode** card.
-  - In the CLI: Run `codex-setup mode lunovant --line codex` or `codex-setup mode personal --line codex`.
+  - In the CLI: Run `lunovant-setup mode lunovant --line codex` or `lunovant-setup mode personal --line codex`.
   - Restart the Codex Desktop app or reload VS Code (`⌘⇧P` / `Ctrl+Shift+P` → **Developer: Reload Window**) after switching modes.
 - **Separate chat histories**:
   - Session history is separated by mode in Codex. Your personal ChatGPT conversations and Lunovant conversations do not mix; when you switch back to a mode, your previous chat threads in that mode reappear.
@@ -165,16 +165,16 @@ All advanced configuration tabs for Codex (Model, API & key, Test connection, Wi
 
 ## Download
 
-1. Open the project's GitHub Releases page and download the package for your system:
-   - `codex-setup-windows-x64.exe` (Windows)
-   - `codex-setup-macos-arm64-app.zip` (macOS Apple Silicon app)
-   - `codex-setup-macos-x64-app.zip` (macOS Intel app)
-   - `codex-setup-macos-arm64` / `codex-setup-macos-x64` (macOS standalone CLI)
-   - `codex-setup-linux-x64` (Linux CLI / TUI)
+1. Open the [GitHub Releases page](https://github.com/lunovant/lunovant-setup/releases) and download the package for your system:
+   - `lunovant-setup-windows-x64.exe` (Windows)
+   - `lunovant-setup-macos-arm64-app.zip` (macOS Apple Silicon app)
+   - `lunovant-setup-macos-x64-app.zip` (macOS Intel app)
+   - `lunovant-setup-macos-arm64` / `lunovant-setup-macos-x64` (macOS standalone CLI)
+   - `lunovant-setup-linux-x64` (Linux CLI / TUI)
 2. Download the matching `.sha256` file and verify it:
-   - macOS: `shasum -a 256 codex-setup-macos-arm64`
-   - Linux: `sha256sum codex-setup-linux-x64`
-   - Windows (PowerShell): `Get-FileHash .\codex-setup-windows-x64.exe -Algorithm SHA256`
+   - macOS: `shasum -a 256 lunovant-setup-macos-arm64`
+   - Linux: `sha256sum lunovant-setup-linux-x64`
+   - Windows (PowerShell): `Get-FileHash .\lunovant-setup-windows-x64.exe -Algorithm SHA256`
 
 ---
 
@@ -182,7 +182,7 @@ All advanced configuration tabs for Codex (Model, API & key, Test connection, Wi
 
 ### Windows
 
-Double-click `codex-setup-windows-x64.exe` (or run it in a terminal).
+Double-click `lunovant-setup-windows-x64.exe` (or run it in a terminal).
 Because release binaries are not yet code-signed, Windows SmartScreen will show:
 > **"Windows protected your PC"**
 
@@ -191,26 +191,26 @@ Click **More info**, then click **Run anyway**. No administrator rights are need
 
 ### macOS
 
-Download `codex-setup-macos-arm64-app.zip` (or Intel `x64`), unzip it, and drag **Codex Setup.app** to your `Applications` folder.
+Download `lunovant-setup-macos-arm64-app.zip` (or Intel `x64`), unzip it, and drag **Lunovant Setup.app** to your `Applications` folder.
 
 For standalone CLI binaries:
 ```bash
-chmod +x ./codex-setup-macos-arm64
-./codex-setup-macos-arm64
+chmod +x ./lunovant-setup-macos-arm64
+./lunovant-setup-macos-arm64
 ```
 
 If Gatekeeper blocks an ad-hoc or unsigned CLI build:
 ```bash
-chmod +x ./codex-setup-macos-arm64
-xattr -d com.apple.quarantine ./codex-setup-macos-arm64 2>/dev/null; ./codex-setup-macos-arm64
+chmod +x ./lunovant-setup-macos-arm64
+xattr -d com.apple.quarantine ./lunovant-setup-macos-arm64 2>/dev/null; ./lunovant-setup-macos-arm64
 ```
 Alternatively, in Finder, right-click the app/file, select **Open**, and confirm.
 
 ### Linux
 
 ```bash
-chmod +x ./codex-setup-linux-x64
-./codex-setup-linux-x64
+chmod +x ./lunovant-setup-linux-x64
+./lunovant-setup-linux-x64
 ```
 
 ---
@@ -241,27 +241,27 @@ Global options: `--codex-home PATH`, `--lang en|vi`. Write commands accept `--dr
 
 ```bash
 # Automated setup via stdin (never pass API keys as command arguments!)
-pbpaste | codex-setup setup --auto
+pbpaste | lunovant-setup setup --auto
 
 # Automated setup keeping personal account(s) as default
-pbpaste | codex-setup setup --auto --keep-personal
+pbpaste | lunovant-setup setup --auto --keep-personal
 
 # Switch default mode across both Codex and Claude Code
-codex-setup mode lunovant
-codex-setup mode personal
+lunovant-setup mode lunovant
+lunovant-setup mode personal
 
 # Switch default mode for a specific product line
-codex-setup mode lunovant --line claude    # Claude Code only
-codex-setup mode lunovant --line codex     # Codex only
-codex-setup mode                          # Show current modes
+lunovant-setup mode lunovant --line claude    # Claude Code only
+lunovant-setup mode lunovant --line codex     # Codex only
+lunovant-setup mode                          # Show current modes
 
 # Codex utilities
-codex-setup model gpt-6.1-terra
-codex-setup test
-codex-setup sandbox unelevated
+lunovant-setup model gpt-6.1-terra
+lunovant-setup test
+lunovant-setup sandbox unelevated
 ```
 
-> **Security tip**: Never pass API keys as CLI flags (such as `-k` or `--key`), as they leak into shell history and system process listings (`ps`). Always pass keys via stdin: `pbpaste | codex-setup setup --auto` (macOS) or `Get-Clipboard | codex-setup setup --auto` (Windows PowerShell).
+> **Security tip**: Never pass API keys as CLI flags (such as `-k` or `--key`), as they leak into shell history and system process listings (`ps`). Always pass keys via stdin: `pbpaste | lunovant-setup setup --auto` (macOS) or `Get-Clipboard | lunovant-setup setup --auto` (Windows PowerShell).
 
 ---
 
@@ -302,7 +302,7 @@ experimental_bearer_token = "sk-..."
 
 **`~/.codex/lunovant.config.toml`** (profile file):
 ```toml
-# Managed by Codex Setup Manager: use with codex -p lunovant
+# Managed by Lunovant Setup: use with codex -p lunovant
 model_provider = "lunovant"
 model = "gpt-6.1-sol"
 ```
@@ -317,16 +317,16 @@ Codex on Windows executes commands inside a sandbox with two modes:
 
 If you encounter sandbox errors ("Couldn't check Windows setup" or "Unable to send message"), switch to `unelevated`:
 ```cmd
-codex-setup sandbox unelevated
+lunovant-setup sandbox unelevated
 ```
 
-To restore Codex's default sandbox behavior: `codex-setup sandbox remove`.
+To restore Codex's default sandbox behavior: `lunovant-setup sandbox remove`.
 
 ---
 
 ## Troubleshooting
 
-Run `codex-setup test` and `codex-setup diagnose` first.
+Run `lunovant-setup test` and `lunovant-setup diagnose` first.
 
 - **401 Unauthorized**: Key is invalid or expired. Re-run setup or check key validity.
 - **403 Forbidden**: Your key does not have access to this model. Check your plan at the Lunovant dashboard.
@@ -340,11 +340,11 @@ Run `codex-setup test` and `codex-setup diagnose` first.
 
 Backups are created before every modification:
 ```bash
-codex-setup backup list
-codex-setup backup restore ID
-codex-setup backup original
-codex-setup uninstall --dry-run
-codex-setup uninstall
+lunovant-setup backup list
+lunovant-setup backup restore ID
+lunovant-setup backup original
+lunovant-setup uninstall --dry-run
+lunovant-setup uninstall
 ```
 
 Uninstall restores modified configuration files, cleans up Lunovant provider settings, and only deletes stored keys upon confirmation. It never touches your conversation history.

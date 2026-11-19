@@ -40,7 +40,7 @@ HIDDEN_IMPORTS = (
 COLLECT_SUBMODULES = ("keyring", "rich._unicode_data", "codex_setup", "webview")
 
 GUI_WEB = SRC / "codex_setup" / "gui" / "web"
-APP_NAME = "Codex Setup"
+APP_NAME = "Lunovant Setup"
 APP_BUNDLE_ID = "tech.lunovant.codexsetup"
 
 
@@ -63,7 +63,7 @@ def exe_name() -> str:
         os_name = "linux"
     else:
         os_name = sys.platform
-    name = f"codex-setup-{os_name}-{arch}"
+    name = f"lunovant-setup-{os_name}-{arch}"
     return name + ".exe" if os_name == "windows" else name
 
 
@@ -86,7 +86,7 @@ def app_path() -> Path:
 
 
 def app_zip_path() -> Path:
-    return DIST / f"codex-setup-macos-{_arch()}-app.zip"
+    return DIST / f"lunovant-setup-macos-{_arch()}-app.zip"
 
 
 def build_command(
@@ -234,9 +234,9 @@ def build_app(args: argparse.Namespace, identity: str | None, entitlements: Path
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build the Codex Setup Manager executable for this OS/arch.")
+    parser = argparse.ArgumentParser(description="Build the Lunovant Setup executable for this OS/arch.")
     parser.add_argument("--smoke", action="store_true", help="run '--version', 'status --help' and 'gui-selftest' on the built binary")
-    parser.add_argument("--app", action="store_true", help="macOS only: build the 'Codex Setup.app' bundle and its zip instead of the CLI binary")
+    parser.add_argument("--app", action="store_true", help="macOS only: build the 'Lunovant Setup.app' bundle and its zip instead of the CLI binary")
     parser.add_argument("--skip-build", action="store_true", help="skip PyInstaller (only checksum/smoke an existing binary)")
     parser.add_argument(
         "--codesign-identity",

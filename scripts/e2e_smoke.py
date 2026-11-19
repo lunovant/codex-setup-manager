@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test for a built codex-setup binary (stdlib only).
+"""End-to-end smoke test for a built lunovant-setup binary (stdlib only).
 
 Usage:
     python scripts/e2e_smoke.py <path-to-binary> [--with-codex]

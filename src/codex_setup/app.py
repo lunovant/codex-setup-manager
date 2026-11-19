@@ -74,7 +74,8 @@ from codex_setup.security.secrets import SecretStore
 
 
 PROFILE_NAME = "lunovant"
-PROFILE_HEADER = "# Managed by Codex Setup Manager: use with  codex -p lunovant"
+LEGACY_PROFILE_HEADER = "# Managed by Codex Setup " + "Manager: use with  codex -p lunovant"  # still recognised on existing files
+PROFILE_HEADER = "# Managed by Lunovant Setup: use with  codex -p lunovant"
 MODES = ("lunovant", "personal")
 
 
@@ -327,7 +328,7 @@ class SetupService:
 
     def _profile_file_ours(self) -> bool:
         try:
-            return self.profile_file.read_text(encoding="utf-8").startswith(PROFILE_HEADER)
+            return self.profile_file.read_text(encoding="utf-8").startswith((PROFILE_HEADER, LEGACY_PROFILE_HEADER))
         except (OSError, UnicodeDecodeError):
             return False
 
@@ -1113,7 +1114,7 @@ class SetupService:
             st = codex_config.get_status(doc)
             pid, table = st.model_provider, st.active_provider
             if not pid or pid in codex_config.RESERVED_PROVIDER_IDS or not table:
-                raise CodexSetupError("No custom provider is active. Run `codex-setup setup`.")
+                raise CodexSetupError("No custom provider is active. Run `lunovant-setup setup`.")
             env_key = table.get("env_key")
             if not env_key:
                 raise CodexSetupError(f"[model_providers.{pid}] has no env_key")
@@ -1177,7 +1178,7 @@ class SetupService:
     def _require_env_key(self) -> str:
         active = self._active()
         if not active.env_key:
-            raise CodexSetupError("No active provider with an env_key. Run `codex-setup setup`.")
+            raise CodexSetupError("No active provider with an env_key. Run `lunovant-setup setup`.")
         return active.env_key
 
     # -- test --------------------------------------------------------------
@@ -1185,10 +1186,10 @@ class SetupService:
         active = self._active()
         bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
         if not active.base_url or not (active.env_key or bearer):
-            raise CodexSetupError("No active provider to test. Run `codex-setup setup`.")
+            raise CodexSetupError("No active provider to test. Run `lunovant-setup setup`.")
         key = (self.get_key(active.env_key) if active.env_key else None) or bearer
         if not key:
-            raise CodexSetupError(f"No API key found for {active.env_key}. Run `codex-setup api --key-stdin`.")
+            raise CodexSetupError(f"No API key found for {active.env_key}. Run `lunovant-setup api --key-stdin`.")
         used = validate_model_name(model) if model else (active.model or DEFAULT_MODEL)
         report = run_api_test(active.base_url, key, used)
         state = load_state(self._env)
@@ -1375,7 +1376,7 @@ class SetupService:
     def launch(self, target: str = "cli", args: list[str] | None = None) -> int:
         active = self._active()
         if not active.env_key:
-            raise CodexSetupError("No active provider. Run `codex-setup setup`.")
+            raise CodexSetupError("No active provider. Run `lunovant-setup setup`.")
         key = self.get_key(active.env_key) or (active.table or {}).get(codex_config.BEARER_FIELD)
         if not key:
             raise CodexSetupError(f"No API key found for {active.env_key}.")
