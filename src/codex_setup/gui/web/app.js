@@ -674,10 +674,14 @@
       pollOC();
     });
   }
-  function reprobe(name, m) {
-    var v = OC.view; if (!v) return Promise.resolve();
+  var RECHECK = { busy: false, max: 3 };
+  // `v` pins the call to the view it started from: a result arriving after uninstall, a new
+  // setup or loadLast replaced OC.view is dropped instead of re-rendering a stale view.
+  function reprobe(name, m, v) {
+    v = v || OC.view; if (!v || OC.view !== v) return Promise.resolve();
     v.secs[name].probes[m] = { running: true }; renderOC(v);
     return api("reprobe_model", m, name).then(function (res) {
+      if (OC.view !== v) return;
       v.secs[name].probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" };
       renderOC(v);
     });
@@ -693,16 +697,33 @@
   $("oc-change").addEventListener("click", function () { showForm(true); $("oc-key").focus(); });
   // "Check again" re-probes every tested model with the stored key (the key is never shown).
   $("oc-recheck").addEventListener("click", function () {
-    var v = OC.view; if (!v) return;
-    $("oc-recheck").disabled = true;
-    var chain = Promise.resolve();
+    var v = OC.view; if (!v || RECHECK.busy) return;
+    var jobs = [];
     LINES.forEach(function (n) {
       (v.secs[n].models || []).forEach(function (m) {
         if (v.secs[n].probes[m] && v.secs[n].probes[m].untested) return;
-        chain = chain.then(function () { return reprobe(n, m); });
+        jobs.push([n, m]);
       });
     });
-    chain.then(function () { $("oc-recheck").disabled = false; });
+    if (!jobs.length) return;
+    var btn = $("oc-recheck"), done = 0, next = 0, total = jobs.length;
+    RECHECK.busy = true; btn.disabled = true;
+    function progress() { btn.textContent = t("oc_rechecking", { done: Math.min(done + 1, total), total: total }); }
+    progress();
+    // At most RECHECK.max probes in flight; a rejected call never stalls the pool or the button.
+    function worker() {
+      if (next >= total || OC.view !== v) return Promise.resolve();  // view replaced: stop
+      var j = jobs[next++];
+      return Promise.resolve().then(function () { return reprobe(j[0], j[1], v); })
+        .catch(function () {})
+        .then(function () { done++; progress(); return worker(); });
+    }
+    var pool = [];
+    for (var i = 0; i < Math.min(RECHECK.max, total); i++) pool.push(worker());
+    Promise.all(pool).then(finish, finish);
+    function finish() {
+      RECHECK.busy = false; btn.disabled = OC.running; btn.textContent = t("oc_recheck");
+    }
   });
   function loadLast() {
     return api("one_click_last").then(function (res) {

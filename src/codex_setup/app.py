@@ -1299,15 +1299,14 @@ class SetupService:
 
     # -- test --------------------------------------------------------------
     def test(self, model: str | None = None) -> ApiTestReport:
-        active = self._active()
-        bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
-        if not active.base_url or not (active.env_key or bearer):
-            raise CodexSetupError("No active provider to test. Run `lunovant-setup setup`.")
-        key = (self.get_key(active.env_key) if active.env_key else None) or bearer
-        if not key:
-            raise CodexSetupError(f"No API key found for {active.env_key}. Run `lunovant-setup api --key-stdin`.")
-        used = validate_model_name(model) if model else (active.model or DEFAULT_MODEL)
-        report = run_api_test(active.base_url, key, used)
+        target = self.test_prepare(model)
+        return self.test_record(self.test_run(target), target[2])
+
+    def test_run(self, target: tuple[str, str, str]) -> ApiTestReport:
+        """Network part of :meth:`test`; touches no config/state, safe outside any lock."""
+        return run_api_test(*target)
+
+    def test_record(self, report: ApiTestReport, used: str) -> ApiTestReport:
         state = load_state(self._env)
         state.last_test = {
             "when": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -1316,6 +1315,18 @@ class SetupService:
         }
         save_state(state, self._env)
         return report
+
+    def test_prepare(self, model: str | None = None) -> tuple[str, str, str]:
+        """Resolve ``(base_url, key, model)`` for a connection test."""
+        active = self._active()
+        bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
+        if not active.base_url or not (active.env_key or bearer):
+            raise CodexSetupError("No active provider to test. Run `lunovant-setup setup`.")
+        key = (self.get_key(active.env_key) if active.env_key else None) or bearer
+        if not key:
+            raise CodexSetupError(f"No API key found for {active.env_key}. Run `lunovant-setup api --key-stdin`.")
+        used = validate_model_name(model) if model else (active.model or DEFAULT_MODEL)
+        return (active.base_url, key, used)
 
     # -- sandbox -----------------------------------------------------------
     def sandbox_applicable(self) -> bool:

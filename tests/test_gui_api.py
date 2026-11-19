@@ -462,3 +462,73 @@ def test_gui_string_keys_used_by_web_exist():
     keys = set(re.findall(r'data-i18n="([^"]+)"', _web("index.html")))
     keys |= set(re.findall(r'\bt\("([a-z0-9_]+)"', _web("app.js")))
     assert {k for k in keys if k not in table} == set()
+
+
+def _blocked_reprobe(gui, monkeypatch):
+    """Start a reprobe whose network probe blocks; returns (entered, release, thread)."""
+    import threading
+
+    from codex_setup.core.state import AppState, save_state
+    from codex_setup.diagnostics import model_probe
+
+    _cfg().parent.mkdir(parents=True, exist_ok=True)
+    _cfg().write_text(_BEARER_CFG, encoding="utf-8")
+    st = AppState()
+    st.one_click = {"base_url": "https://api.lunovant.tech/v1", "results": [
+        {"model": "gpt-6", "ok": False, "error": "429"}]}
+    save_state(st, gui._svc._env)
+    entered, release = threading.Event(), threading.Event()
+
+    def fake(url, key, models, **kw):
+        entered.set()
+        release.wait(10)
+        return [{"model": models[0], "ok": True, "latency_ms": 5, "error": None}]
+
+    monkeypatch.setattr(model_probe, "probe_models", fake)
+    out: dict = {}
+    th = threading.Thread(target=lambda: out.update(gui.reprobe_model("gpt-6")))
+    th.start()
+    assert entered.wait(5)
+    return release, th, out
+
+
+def _call_within(fn, secs=1.0):
+    import threading
+
+    box: dict = {}
+    th = threading.Thread(target=lambda: box.update(r=fn()))
+    th.start()
+    th.join(secs)
+    assert not th.is_alive(), "API call blocked behind the network probe"
+    return box["r"]
+
+
+def test_status_not_blocked_by_reprobe(gui, monkeypatch):
+    from codex_setup.core.state import load_state
+
+    release, th, out = _blocked_reprobe(gui, monkeypatch)
+    try:
+        assert _call_within(gui.status)["ok"]
+    finally:
+        release.set()
+        th.join(5)
+    assert out["ok"] and out["result"]["ok"]
+    assert load_state(gui._svc._env).one_click["results"][0]["ok"] is True
+
+
+def test_set_mode_not_blocked_by_reprobe(gui, monkeypatch):
+    release, th, out = _blocked_reprobe(gui, monkeypatch)
+    try:
+        res = _call_within(lambda: gui.set_mode("lunovant", True))
+        assert "ok" in res
+    finally:
+        release.set()
+        th.join(5)
+
+
+def test_recheck_is_pinned_to_its_view():
+    js = _web("app.js")
+    assert "function reprobe(name, m, v)" in js
+    assert "OC.view !== v" in js.split("function reprobe(name, m, v)")[1].split("$(\"oc-go\")")[0]
+    assert "reprobe(j[0], j[1], v)" in js
+    assert "next >= total || OC.view !== v" in js
