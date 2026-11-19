@@ -859,7 +859,18 @@
 
   function init() {
     api("default_lang").then(function (r) { return setLang(r.lang || "en"); })
-      .then(refreshStatus).then(loadModels).then(loadLast);
+      .then(refreshStatus).then(loadModels).then(loadLast)
+      .then(refreshCatalog);
+  }
+  // Background: keep the Codex model list in line with what Lunovant sells. Shows one line
+  // only when something changed; the window stays usable meanwhile.
+  function refreshCatalog() {
+    api("refresh_catalog").then(function (res) {
+      var el = $("catalog-note");
+      if (!res.ok || !res.text) return;
+      el.textContent = res.text;
+      el.hidden = false;
+    });
   }
   if (window.pywebview && window.pywebview.api) init();
   else window.addEventListener("pywebviewready", init);

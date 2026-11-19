@@ -131,6 +131,12 @@ Base URL: `https://api.lunovant.tech`. API endpoint: `https://api.lunovant.tech/
 
 ---
 
+### Model list in Codex
+
+- The Codex model picker shows exactly the models Lunovant sells (a catalog file `lunovant-models.json` in `$CODEX_HOME`; Codex never asks the provider for its models).
+- Opening the app refreshes the list: new models appear, and a list that a newer Codex cannot read is removed automatically. The command line does the same with `lunovant-setup refresh-catalog` (also run before `status` / `mode`; `--offline` skips the network and keeps the last known list).
+- If Codex prints `failed to parse model_catalog_json ...`, open Lunovant Setup (it refreshes or removes the invalid list) or run `lunovant-setup refresh-catalog`.
+
 ## Supported systems
 
 | OS | Architecture | Codex CLI / Desktop | Claude Code (CLI / IDE) | Lunovant Setup App |

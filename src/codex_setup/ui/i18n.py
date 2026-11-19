@@ -561,6 +561,11 @@ EN.update({
     "catalog_failed": "Could not create the model catalog for Codex {version}; the model picker may lack new models.",
     "catalog_foreign": "Kept the existing lunovant-models.json (not created by this app); skipped the model catalog.",
     "catalog_no_codex": "No Codex installation found; skipped the model catalog (the model picker may lack new models).",
+    "catalog_updated": "Updated the model list for Codex: {changes}",
+    "catalog_added": "added {models}",
+    "catalog_dropped": "dropped {models}",
+    "catalog_removed": "Removed the model list that is no longer valid for Codex {version}.",
+    "catalog_unchanged": "The model list for Codex is up to date.",
     "oc_line_codex": "Codex",
     "oc_line_claude": "Claude Code",
     "oc_claude_models": "Models ({n} tested OK / {total} tested):",
@@ -578,6 +583,11 @@ VI.update({
     "catalog_failed": "Không tạo được danh mục model cho Codex {version}; danh sách chọn model có thể thiếu model mới.",
     "catalog_foreign": "Giữ nguyên lunovant-models.json có sẵn (không do ứng dụng tạo); bỏ qua danh mục model.",
     "catalog_no_codex": "Không tìm thấy Codex nào; bỏ qua danh mục model (danh sách chọn model có thể thiếu model mới).",
+    "catalog_updated": "Đã cập nhật danh sách model cho Codex: {changes}",
+    "catalog_added": "thêm {models}",
+    "catalog_dropped": "gỡ {models}",
+    "catalog_removed": "Đã gỡ danh sách model không còn hợp lệ với Codex {version}.",
+    "catalog_unchanged": "Danh sách model cho Codex đã mới nhất.",
     "oc_line_codex": "Codex",
     "oc_line_claude": "Claude Code",
     "oc_claude_models": "Model ({n} chạy được / {total} đã kiểm tra):",
@@ -629,6 +639,20 @@ def catalog_text(info: dict | None) -> str | None:
     if info.get("ok"):
         return t("oc_catalog_ok", n=info.get("listed", 0), hidden=info.get("hidden", 0))
     return t(str(info.get("code") or "catalog_failed"), **(info.get("params") or {}))
+
+
+def refresh_text(info: dict | None) -> str | None:
+    """One info line for a catalog refresh that changed something (None = show nothing)."""
+    if not info or not info.get("changed"):
+        return None
+    if info.get("code") == "removed":
+        return t("catalog_removed", **(info.get("params") or {}))
+    parts = []
+    if info.get("added"):
+        parts.append(t("catalog_added", models=", ".join(info["added"])))
+    if info.get("removed"):
+        parts.append(t("catalog_dropped", models=", ".join(info["removed"])))
+    return t("catalog_updated", changes="; ".join(parts)) if parts else None
 
 
 def tr_step(step: object) -> str:

@@ -493,3 +493,289 @@ def test_relative_codex_home_is_stored_absolute(fake: FakeCodex, tmp_path: Path,
     assert Path(value).is_file()
     prof = tomllib.loads((tmp_path / "rel-home" / "lunovant.config.toml").read_text(encoding="utf-8"))
     assert prof["model_catalog_json"] == value
+
+
+# -- refresh_catalog / mode switch ----------------------------------------------------------
+def listed(svc: SetupService) -> set[str]:
+    data = json.loads(svc.catalog_file.read_text(encoding="utf-8"))
+    return {m["slug"] for m in data["models"] if m["visibility"] == "list"}
+
+
+def install_without_catalog(svc: SetupService, monkeypatch, fake: FakeCodex) -> None:
+    """Old-app install: Lunovant is set up but no catalog exists."""
+    with monkeypatch.context() as m:
+        m.setattr(mc, "find_codex_binaries", lambda **kw: [])
+        assert svc.one_click_setup(KEY, client=make_client()).ok
+    assert not svc.catalog_file.exists() and "model_catalog_json" not in cfg(svc)
+    svc._catalog_runner = fake
+    monkeypatch.setattr(mc, "find_codex_binaries", lambda **kw: binaries(fake))
+
+
+def test_set_mode_lunovant_builds_missing_catalog(svc: SetupService, fake: FakeCodex,
+                                                  monkeypatch) -> None:
+    install_without_catalog(svc, monkeypatch, fake)
+    svc.set_mode("personal")
+    svc._http_client = make_client()
+    res = svc.set_mode("lunovant")
+    path = str(svc.catalog_file)
+    assert cfg(svc)["model_catalog_json"] == path and profile(svc)["model_catalog_json"] == path
+    assert listed(svc) == {"gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-luna"}
+    assert not res.notes and svc.ownership().model_catalog == path
+
+
+def test_set_mode_catalog_failure_is_only_a_note(svc: SetupService, fake: FakeCodex,
+                                                 monkeypatch) -> None:
+    install_without_catalog(svc, monkeypatch, fake)
+    fake.failing.add("/a/codex")
+    svc._http_client = make_client()
+    res = svc.set_mode("lunovant")
+    assert cfg(svc)["model_provider"] == "lunovant"
+    assert [n[0] for n in res.notes] == ["catalog_failed"]
+    assert "model_catalog_json" not in cfg(svc) and not svc.catalog_file.exists()
+
+
+def test_refresh_adds_removes_and_is_idempotent(svc: SetupService) -> None:
+    svc.one_click_setup(KEY, client=make_client())
+    first = svc.catalog_file.read_bytes()
+    same = svc.refresh_catalog(client=make_client())
+    assert not same.changed and svc.catalog_file.read_bytes() == first
+    mtime = svc.catalog_file.stat().st_mtime_ns
+    sha = svc.ownership().model_catalog_sha
+    svc.refresh_catalog(client=make_client())
+    assert svc.catalog_file.stat().st_mtime_ns == mtime and svc.ownership().model_catalog_sha == sha
+
+    res = svc.refresh_catalog(client=make_client(SOLD_IDS + ["gpt-6.3-sol"]))
+    assert res.changed and res.added == ["gpt-6.3-sol"] and res.removed == []
+    assert "gpt-6.3-sol" in listed(svc)
+    assert svc.ownership().model_catalog_sha != sha
+    assert cfg(svc)["model_catalog_json"] == str(svc.catalog_file)
+
+    res = svc.refresh_catalog(client=make_client([m for m in SOLD_IDS if m != "gpt-6-luna"]))
+    assert res.changed and set(res.removed) == {"gpt-6-luna", "gpt-6.3-sol"} and res.added == []
+    assert "gpt-6-luna" not in listed(svc)
+    assert KEY not in svc.catalog_file.read_text(encoding="utf-8")
+
+
+def test_refresh_invalid_binary_removes_key_and_file(svc: SetupService, fake: FakeCodex) -> None:
+    svc.one_click_setup(KEY, client=make_client())
+    # config as it is without our catalog key
+    expected = svc.config_path.read_text(encoding="utf-8").replace(
+        f'model_catalog_json = "{svc.catalog_file}"\n', "")
+    fake.failing.add("/b/codex")
+    res = svc.refresh_catalog(client=make_client(SOLD_IDS + ["gpt-6.3-sol"]))
+    assert res.changed and res.code == "removed" and res.params == {"version": "0.169.0-alpha.11.1"}
+    assert "model_catalog_json" not in cfg(svc) and "model_catalog_json" not in profile(svc)
+    assert not svc.catalog_file.exists() and svc.ownership().model_catalog is None
+    assert svc.config_path.read_text(encoding="utf-8") == expected
+    from codex_setup.ui import i18n
+    i18n.set_lang("vi")
+    try:
+        assert i18n.refresh_text(res.to_dict()) == (
+            "Đã gỡ danh sách model không còn hợp lệ với Codex 0.169.0-alpha.11.1.")
+    finally:
+        i18n.set_lang("en")
+
+
+def test_refresh_offline_uses_stored_sold_list(svc: SetupService) -> None:
+    svc.one_click_setup(KEY, client=make_client())
+    before = svc.catalog_file.read_bytes()
+
+    def down(req: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline")
+
+    broken = httpx.Client(transport=httpx.MockTransport(down))
+    assert not svc.refresh_catalog(client=broken).changed
+    assert not svc.refresh_catalog(offline=True, client=make_client(["gpt-9-sol"])).changed
+    assert svc.catalog_file.read_bytes() == before and "gpt-6.2-sol" in listed(svc)
+    # stored list drives a rebuild when the file is gone (e.g. user deleted it)
+    svc.catalog_file.unlink()
+    res = svc.refresh_catalog(offline=True)
+    assert res.changed and listed(svc) == {"gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra", "gpt-6-luna"}
+
+
+def test_refresh_never_touches_foreign_file_and_no_binaries(svc: SetupService,
+                                                            monkeypatch) -> None:
+    svc.one_click_setup(KEY, client=make_client())
+    cfg_before = svc.config_path.read_bytes()
+    svc.catalog_file.write_text('{"edited": 1}', encoding="utf-8")
+    res = svc.refresh_catalog(client=make_client(SOLD_IDS + ["gpt-6.3-sol"]))
+    assert not res.changed and res.note == ("catalog_foreign", {})
+    assert svc.catalog_file.read_text(encoding="utf-8") == '{"edited": 1}'
+    assert svc.config_path.read_bytes() == cfg_before
+
+    svc.catalog_file.write_bytes(b"")  # restore an owned-looking state is not possible; reinstall
+    svc.catalog_file.unlink()
+    svc.refresh_catalog(client=make_client())
+    good = svc.catalog_file.read_bytes()
+    monkeypatch.setattr(mc, "find_codex_binaries", lambda **kw: [])
+    res = svc.refresh_catalog(client=make_client(SOLD_IDS + ["gpt-6.3-sol"]))
+    assert not res.changed and res.code == "no_codex"
+    assert svc.catalog_file.read_bytes() == good
+
+
+def test_refresh_not_installed_is_noop(svc: SetupService) -> None:
+    assert svc.refresh_catalog(client=make_client()).code == "skipped"
+    assert not svc.config_path.exists()
+
+
+def test_refresh_in_personal_mode_updates_profile_only(svc: SetupService) -> None:
+    svc.one_click_setup(KEY, client=make_client(), mode="personal")
+    res = svc.refresh_catalog(client=make_client(SOLD_IDS + ["gpt-6.3-sol"]))
+    assert res.changed and "model_catalog_json" not in cfg(svc)
+    assert profile(svc)["model_catalog_json"] == str(svc.catalog_file)
+
+
+def test_gui_refresh_does_not_hold_lock(svc: SetupService, fake: FakeCodex, monkeypatch) -> None:
+    import threading
+    import time
+
+    from codex_setup.gui.api import GuiApi
+
+    svc.one_click_setup(KEY, client=make_client())
+    svc._http_client = make_client(SOLD_IDS + ["gpt-6.3-sol"])
+    gate, entered = threading.Event(), threading.Event()
+
+    def slow_find(**kw):
+        entered.set()
+        gate.wait(10)  # a fake binary that blocks
+        return binaries(fake)
+
+    monkeypatch.setattr(mc, "find_codex_binaries", slow_find)
+    api = GuiApi(svc, lang="vi")
+    out: dict = {}
+    th = threading.Thread(target=lambda: out.update(api.refresh_catalog()))
+    th.start()
+    try:
+        assert entered.wait(5)
+        t0 = time.monotonic()
+        assert api.status()["ok"]
+        assert time.monotonic() - t0 < 1
+    finally:
+        gate.set()
+        th.join(10)
+    assert out["ok"] and out["changed"] and out["added"] == ["gpt-6.3-sol"]
+    assert out["text"] == "Đã cập nhật danh sách model cho Codex: thêm gpt-6.3-sol"
+    assert KEY not in json.dumps(out)
+
+
+def test_gui_refresh_silent_when_unchanged(svc: SetupService) -> None:
+    from codex_setup.gui.api import GuiApi
+
+    svc.one_click_setup(KEY, client=make_client())
+    svc._http_client = make_client()
+    out = GuiApi(svc, lang="en").refresh_catalog()
+    assert out["ok"] and not out["changed"] and out["text"] is None
+
+
+def test_diagnostics_matches_real_parse_error() -> None:
+    from codex_setup.diagnostics.knowledge import lookup
+
+    text = ("Error: failed to parse model_catalog_json path `/home/u/.codex/lunovant-models.json` "
+            "as JSON: missing field `display_name` at line 3 column 5")
+    found = lookup(text)
+    assert [i.id for i in found] == ["model_catalog_invalid"]
+    assert "lunovant-setup refresh-catalog" in found[0].steps["vi"][0]
+    assert "Mở Lunovant Setup" in found[0].steps["vi"][0]
+
+
+def test_cli_refresh_catalog_command(svc: SetupService, capsys, monkeypatch) -> None:
+    from codex_setup import main as cli
+
+    svc.one_click_setup(KEY, client=make_client())
+    svc._http_client = make_client(SOLD_IDS + ["gpt-6.3-sol"])
+    monkeypatch.setattr(cli, "make_service", lambda: svc)
+    assert cli.main(["--lang", "vi", "refresh-catalog"]) == 0
+    assert "thêm gpt-6.3-sol" in capsys.readouterr().out
+    assert cli.main(["--lang", "vi", "refresh-catalog", "--offline"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+# -- review fixes ---------------------------------------------------------------------------
+def test_concurrent_builds_use_own_candidates(svc: SetupService, fake: FakeCodex,
+                                               monkeypatch) -> None:
+    install_without_catalog(svc, monkeypatch, fake)
+    plan_a, plan_b = svc.catalog_refresh_plan(), svc.catalog_refresh_plan()
+    _, built_a = svc.catalog_refresh_run(plan_a, client=make_client(["gpt-6.1-sol"]))
+    _, built_b = svc.catalog_refresh_run(plan_b, client=make_client(["gpt-6.2-sol", "gpt-6-luna"]))
+    assert built_a.candidate != built_b.candidate
+    assert built_a.candidate.is_file() and built_b.candidate.is_file()
+    assert svc.catalog_refresh_apply(plan_a, built_a).changed
+    assert svc.catalog_refresh_apply(plan_b, built_b).code == "skipped"  # state moved on
+    assert listed(svc) == {"gpt-6.1-sol"}
+    assert mc.sha256_file(svc.catalog_file) == svc.ownership().model_catalog_sha == built_a.sha
+    assert not list(svc.catalog_file.parent.glob(".*.candidate"))
+
+
+def test_refresh_result_dropped_when_model_changes_or_uninstalled(
+        svc: SetupService, fake: FakeCodex, monkeypatch) -> None:
+    install_without_catalog(svc, monkeypatch, fake)
+    plan = svc.catalog_refresh_plan()
+    _, built = svc.catalog_refresh_run(plan, client=make_client())
+    svc.change_model("gpt-6.2-sol")
+    assert svc.catalog_refresh_apply(plan, built).code == "skipped"
+    assert cfg(svc)["model"] == "gpt-6.2-sol" and profile(svc)["model"] == "gpt-6.2-sol"
+    assert not svc.catalog_file.exists() and "model_catalog_json" not in cfg(svc)
+
+    plan = svc.catalog_refresh_plan()
+    _, built = svc.catalog_refresh_run(plan, client=make_client())
+    svc.uninstall()
+    assert svc.catalog_refresh_apply(plan, built).code == "skipped"
+    assert not svc.catalog_file.exists() and not svc.profile_file.exists()
+    assert not list(svc.catalog_file.parent.glob(".*.candidate"))
+
+
+def test_cli_refresh_dry_run_writes_nothing(svc: SetupService, capsys, monkeypatch) -> None:
+    from codex_setup import main as cli
+    from codex_setup.core import paths
+
+    svc.one_click_setup(KEY, client=make_client())
+    svc._http_client = make_client(SOLD_IDS + ["gpt-6.3-sol"])
+    monkeypatch.setattr(cli, "make_service", lambda: svc)
+
+    def snap():
+        files = [svc.config_path, svc.profile_file, svc.catalog_file,
+                 *[p for p in paths.app_state_dir().rglob("*") if p.is_file()]]
+        return {str(p): (p.read_bytes(), p.stat().st_mtime_ns) for p in files}
+
+    before = snap()
+    assert cli.main(["refresh-catalog", "--dry-run"]) == 1
+    assert snap() == before
+
+
+def _counting_client(calls: list):
+    inner = make_client()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(req.url.path)
+        return httpx.Response(500)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_cli_mode_offline_never_calls_http(svc: SetupService, fake: FakeCodex, monkeypatch,
+                                           fails: bool) -> None:
+    from codex_setup import main as cli
+
+    install_without_catalog(svc, monkeypatch, fake)
+    svc.set_mode("personal")
+    calls: list = []
+    svc._http_client = _counting_client(calls)
+    if fails:
+        fake.failing.add("/b/codex")
+    monkeypatch.setattr(cli, "make_service", lambda: svc)
+    assert cli.main(["mode", "lunovant", "--offline", "--yes"]) == 0
+    assert calls == []
+    assert cfg(svc)["model_provider"] == "lunovant"
+    assert svc.catalog_file.exists() is (not fails)
+    assert ("model_catalog_json" in cfg(svc)) is (not fails)
+
+
+def test_refresh_empty_models_answer_still_validates_stored_list(
+        svc: SetupService, fake: FakeCodex) -> None:
+    svc.one_click_setup(KEY, client=make_client())
+    fake.failing.add("/b/codex")
+    res = svc.refresh_catalog(client=make_client([]))
+    assert res.changed and res.code == "removed"
+    assert "model_catalog_json" not in cfg(svc) and "model_catalog_json" not in profile(svc)
+    assert not svc.catalog_file.exists()

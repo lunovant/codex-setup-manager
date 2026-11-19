@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from codex_setup import __version__
-from codex_setup.app import MODES, SetupService, normalize_key, suggest_v1
+from codex_setup.app import MODES, CatalogRefresh, SetupService, normalize_key, suggest_v1
 from codex_setup.core.config_store import SaveResult
 from codex_setup.core import claude_config, codex_config
 from codex_setup.core.state import load_state, save_state
@@ -524,20 +524,57 @@ class GuiApi:
     def set_mode(self, mode: str, dry_run: bool = False, line: str = "codex") -> dict[str, Any]:
         def run() -> dict[str, Any]:
             if line == "claude":
-                if mode == "personal" and not self._svc.claude_login_present():
-                    raise ValidationError(self._gt("g_claude_mode_no_login"))
-                out = self._diff(self._svc.claude_set_mode(mode, bool(dry_run)))
-                out["mode"] = mode if not dry_run else self._svc.claude_current_mode()
-                return out
+                with self._lock:
+                    if mode == "personal" and not self._svc.claude_login_present():
+                        raise ValidationError(self._gt("g_claude_mode_no_login"))
+                    out = self._diff(self._svc.claude_set_mode(mode, bool(dry_run)))
+                    out["mode"] = mode if not dry_run else self._svc.claude_current_mode()
+                    return out
             if line != "codex":
                 raise ValidationError(f"Unknown line: {line!r}")
-            if mode == "personal" and not self._svc.chatgpt_login_present():
-                raise ValidationError(i18n.t("g_mode_no_login"))
-            out = self._diff(self._svc.set_mode(mode, bool(dry_run)))
-            out["mode"] = mode if not dry_run else self._svc.current_mode()
+            with self._lock:
+                if mode == "personal" and not self._svc.chatgpt_login_present():
+                    raise ValidationError(i18n.t("g_mode_no_login"))
+                res = self._svc.set_mode(mode, bool(dry_run), build_catalog=False)
+                out = self._diff(res)
+                out["mode"] = mode if not dry_run else self._svc.current_mode()
+            if mode == "lunovant" and not dry_run:
+                # network / binaries run outside the lock; a failure is only a note
+                try:
+                    note = self._refresh_catalog(only_if_missing=True).note
+                except Exception:
+                    note = ("catalog_failed", {"version": "?"})
+                if note:
+                    out["notes"] = list(out.get("notes") or []) + [i18n.t(note[0], **note[1])]
             return out
 
-        return self._guard(run)
+        return self._guard(run, locked=False)
+
+    def _refresh_catalog(self, *, only_if_missing: bool = False) -> CatalogRefresh:
+        """plan (locked) -> binaries + network (NOT locked) -> write (locked)."""
+        svc = self._svc
+        with self._lock:
+            plan = svc.catalog_refresh_plan()
+        if plan is None:
+            return CatalogRefresh(code="skipped")
+        if plan.key:
+            self._seen.append(plan.key)
+        early, built = svc.catalog_refresh_run(plan, only_if_missing=only_if_missing)
+        if early is not None or built is None:
+            return early or CatalogRefresh(code="skipped")
+        with self._lock:
+            return svc.catalog_refresh_apply(plan, built)
+
+    def refresh_catalog(self) -> dict[str, Any]:
+        """Called once after the window loads: keep the Codex model list in line with what
+        Lunovant sells. ``text`` is set only when something changed."""
+
+        def run() -> dict[str, Any]:
+            out = self._refresh_catalog().to_dict()
+            out["text"] = i18n.refresh_text(out)
+            return out
+
+        return self._guard(run, locked=False)
 
     def set_default_model(self, model: str) -> dict[str, Any]:
         return self._guard(lambda: self._diff(self._svc.set_default_model(model)))

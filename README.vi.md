@@ -129,6 +129,12 @@ Base URL: `https://api.lunovant.tech`. API endpoint: `https://api.lunovant.tech/
 
 ---
 
+### Danh sách model trong Codex
+
+- Danh sách chọn model của Codex hiển thị đúng các model Lunovant đang bán (file danh mục `lunovant-models.json` trong `$CODEX_HOME`; Codex không bao giờ hỏi nhà cung cấp danh sách model).
+- Mở ứng dụng sẽ tự làm mới danh sách: model mới xuất hiện, còn danh sách mà Codex bản mới không đọc được sẽ tự động bị gỡ. Dòng lệnh làm tương tự bằng `lunovant-setup refresh-catalog` (cũng chạy trước `status` / `mode`; `--offline` bỏ qua mạng và giữ danh sách đã biết gần nhất).
+- Nếu Codex báo lỗi `failed to parse model_catalog_json ...`, hãy mở Lunovant Setup (app tự làm mới hoặc gỡ danh sách không hợp lệ) hoặc chạy `lunovant-setup refresh-catalog`.
+
 ## Hệ điều hành hỗ trợ
 
 | Hệ điều hành | Kiến trúc | Codex CLI / Desktop | Claude Code (CLI / IDE) | Ứng dụng Lunovant Setup |

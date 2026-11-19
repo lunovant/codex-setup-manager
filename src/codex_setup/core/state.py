@@ -70,6 +70,8 @@ class ConfigOwnership:
     model_catalog: str | None = None
     # sha256 of the catalog we wrote: the file is replaced/removed only while it still matches
     model_catalog_sha: str | None = None
+    # models Lunovant sold at the last catalog build: the offline fallback of the refresh
+    model_catalog_sold: list[str] | None = None
 
     def is_empty(self) -> bool:
         return not (
@@ -97,6 +99,7 @@ class ConfigOwnership:
             "legacy_profile": self.legacy_profile,
             "model_catalog": self.model_catalog,
             "model_catalog_sha": self.model_catalog_sha,
+            "model_catalog_sold": self.model_catalog_sold,
         }
 
     @classmethod
@@ -138,8 +141,11 @@ class ConfigOwnership:
         sha = d.get("model_catalog_sha")
         if sha is not None:
             _expect(sha, str, "model_catalog_sha")
+        sold = d.get("model_catalog_sold")
+        if sold is not None:
+            sold = _str_list(sold, "model_catalog_sold")
         return cls(ids, top, snap, overwritten, written, credentials, installs, bearer, legacy,
-                   catalog, sha)
+                   catalog, sha, sold)
 
 
 def _expect(value: Any, typ: type, what: str) -> Any:

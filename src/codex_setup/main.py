@@ -16,7 +16,7 @@ from codex_setup.core.config_store import SaveResult
 from codex_setup.core.errors import CodexSetupError, ValidationError
 from codex_setup.providers.catalog import DEFAULT_MODEL, normalize_base_url, suggest_v1
 from codex_setup.security.redact import mask_key, redact, redact_config_text
-from codex_setup.ui.i18n import default_lang, set_lang, t, tr_check, tr_step, catalog_text
+from codex_setup.ui.i18n import default_lang, set_lang, t, tr_check, tr_step, catalog_text, refresh_text
 
 _SEEN_SECRETS: list[str] = []
 
@@ -40,6 +40,8 @@ def _common() -> argparse.ArgumentParser:
     p.add_argument("--lang", choices=["en", "vi"], help="interface language")
     p.add_argument("--yes", "-y", action="store_true", help="skip confirmations")
     p.add_argument("--dry-run", action="store_true", help="show the diff, write nothing")
+    p.add_argument("--offline", action="store_true",
+                   help="no network: the model list refresh uses the last known sold models")
     ui = p.add_mutually_exclusive_group()
     ui.add_argument("--gui", action="store_true", help="open the desktop GUI (no subcommand)")
     ui.add_argument("--tui", action="store_true", help="open the terminal menu (no subcommand)")
@@ -78,6 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("name", nargs="?", choices=["lunovant", "personal"])
     p.add_argument("--line", choices=["codex", "claude"],
                    help="product to switch (default: every product that is set up)")
+
+    add("refresh-catalog", "refresh the model list shown in Codex (what Lunovant sells)")
 
     p = add("model", "show or change the model")
     p.add_argument("name", nargs="?")
@@ -224,6 +228,30 @@ def _cmd_status(svc: SetupService, ns: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_refresh_catalog(svc: SetupService, ns: argparse.Namespace) -> int:
+    if ns.dry_run:
+        raise ValidationError("refresh-catalog does not support --dry-run; nothing was changed.")
+    res = svc.refresh_catalog(offline=bool(getattr(ns, "offline", False)))
+    text = refresh_text(res.to_dict())
+    if text:
+        _out(text)
+    elif res.note and res.code != "skipped":
+        _out(t(res.note[0], **res.note[1]))
+    return 0
+
+
+def _auto_refresh(svc: SetupService, ns: argparse.Namespace) -> None:
+    """Quietly keep the catalog fresh before ``status`` / ``mode``; never fails the command."""
+    if ns.dry_run or (ns.command == "mode" and getattr(ns, "name", None) == "personal"):
+        return
+    try:
+        text = refresh_text(svc.refresh_catalog(offline=bool(getattr(ns, "offline", False))).to_dict())
+    except Exception:
+        return
+    if text:
+        _out(text)
+
+
 def _resolve_url(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -323,7 +351,8 @@ def _cmd_mode(svc: SetupService, ns: argparse.Namespace) -> int:
         return 0
     for line in lines:
         if line == "codex":
-            res = _apply(ns, lambda dry: svc.set_mode(ns.name, dry))
+            res = _apply(ns, lambda dry: svc.set_mode(
+                ns.name, dry, offline=bool(getattr(ns, "offline", False))))
         else:
             res = _apply(ns, lambda dry: svc.claude_set_mode(ns.name, dry))
         if res is not None and res.changed and not res.dry_run:
@@ -541,6 +570,7 @@ _HANDLERS: dict[str, Callable[[SetupService, argparse.Namespace], int]] = {
     "status": _cmd_status,
     "setup": _cmd_setup,
     "mode": _cmd_mode,
+    "refresh-catalog": _cmd_refresh_catalog,
     "model": _cmd_model,
     "api": _cmd_api,
     "test": _cmd_test,
@@ -622,6 +652,8 @@ def main(argv: list[str] | None = None) -> int:
                 return tui.run(svc, dry_run=ns.dry_run)
             _cmd_status(svc, ns)
             return _hint()
+        if ns.command in ("status", "mode"):
+            _auto_refresh(svc, ns)
         return _HANDLERS[ns.command](svc, ns)
     except KeyboardInterrupt:
         _err(t("cli_cancel_sigint"))

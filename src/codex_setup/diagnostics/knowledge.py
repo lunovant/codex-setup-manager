@@ -38,6 +38,24 @@ _SANDBOX_STEPS_VI = [
 
 ISSUES: tuple[KnownIssue, ...] = (
     KnownIssue(
+        "model_catalog_invalid",
+        (r"model_catalog_json.*failed to parse", r"failed to parse.*model_catalog_json"),
+        {"en": "Codex cannot read the model list (model_catalog_json)",
+         "vi": "Codex không đọc được danh sách model (model_catalog_json)"},
+        {
+            "en": "Codex refuses to start when the model list file it points to cannot be parsed, "
+                  "for example after a Codex update that requires a new field.",
+            "vi": "Codex không khởi động được khi file danh sách model mà nó trỏ tới không đọc được, "
+                  "ví dụ sau khi Codex cập nhật và yêu cầu thêm trường mới.",
+        },
+        {
+            "en": ["Open Lunovant Setup: the app refreshes or removes an invalid model list "
+                   "(or run `lunovant-setup refresh-catalog`)."],
+            "vi": ["Mở Lunovant Setup: app tự làm mới hoặc gỡ danh sách model không hợp lệ "
+                   "(hoặc chạy `lunovant-setup refresh-catalog`)."],
+        },
+    ),
+    KnownIssue(
         "provider_mismatch",
         ("model provider mismatch", "provider mismatch", "different model provider",
          "thread was created with"),

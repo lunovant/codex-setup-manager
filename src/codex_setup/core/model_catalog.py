@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -383,7 +384,8 @@ def create_catalog(
     ``note`` says why (the catalog must never make an installed Codex fail to start)."""
     codex_home = Path(os.path.abspath(codex_home))  # Codex runs from other directories
     path = codex_home / CATALOG_FILE
-    candidate = codex_home / f".{CATALOG_FILE}.candidate"
+    # unique per build: concurrent builds never share (or delete) each other's candidate
+    candidate = codex_home / f".{CATALOG_FILE}.{uuid.uuid4().hex}.candidate"
     sold = [s for s in dict.fromkeys(sold) if s]
     if not binaries:
         return CatalogResult(False, note=("catalog_no_codex", {}))
