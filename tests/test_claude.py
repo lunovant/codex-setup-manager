@@ -171,7 +171,9 @@ def test_settings_write_keeps_foreign_keys_mode_backup_ownership(svc):
     assert env["FOO"] == "1"
     assert env["ANTHROPIC_BASE_URL"] == "https://api.lunovant.tech"  # origin, no /v1
     assert env["ANTHROPIC_AUTH_TOKEN"] == KEY
-    assert env["ANTHROPIC_MODEL"] == env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-5-5"
+    assert "ANTHROPIC_MODEL" not in env and env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "claude-opus-5-5"
+    assert data["model"] == "opus"
+    assert "ANTHROPIC_MODEL" not in _env_of(_profile()) and "model" not in json.loads(_profile().read_text())
     assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "claude-sonnet-5-5"
     assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "claude-haiku-5-5"
     if os.name == "posix":
@@ -258,29 +260,32 @@ def test_never_touches_credentials(svc, tmp_path):
     '{"theme":"dark",\n    "env": {"FOO": "1"}}',  # odd formatting, no trailing newline
     "﻿" + ORIGINAL,
 ])
-def test_mode_round_trip_restores_original_exactly(svc, text):
+def test_mode_round_trip_restores_env_and_keeps_model(svc, text):
     _write_settings(text)
-    raw = _settings().read_bytes()
+    before = json.loads(_settings().read_text(encoding="utf-8-sig"))
     svc.one_click_setup(KEY, client=make_client(CLAUDE))
     assert svc.claude_current_mode() == "lunovant"
-    assert _settings().read_bytes() != raw
     svc.claude_set_mode("personal")
-    assert _settings().read_bytes() == raw
+    assert json.loads(_settings().read_text()) == {**before, "model": "opus"}
     assert svc.claude_current_mode() == "personal"
     assert _profile().exists()  # `claude --settings ...` keeps working
     svc.claude_set_mode("lunovant")
     assert svc.claude_current_mode() == "lunovant"
     assert _env_of(_settings())["ANTHROPIC_AUTH_TOKEN"] == KEY
     svc.claude_set_mode("personal")
-    assert _settings().read_bytes() == raw
+    assert json.loads(_settings().read_text()) == {**before, "model": "opus"}
+    svc.uninstall()
+    assert json.loads(_settings().read_text(encoding="utf-8-sig")) == before
 
 
 def test_mode_round_trip_when_no_settings_file(svc):
     svc.one_click_setup(KEY, client=make_client(CLAUDE))
     svc.claude_set_mode("personal")
-    assert not _settings().exists()
+    assert json.loads(_settings().read_text()) == {"model": "opus"}
     svc.claude_set_mode("lunovant")
     assert svc.claude_current_mode() == "lunovant"
+    svc.uninstall()
+    assert not _settings().exists()
 
 
 def test_personal_at_setup_leaves_settings_alone(svc):
@@ -298,7 +303,7 @@ def test_personal_at_setup_leaves_settings_alone(svc):
 def test_displaced_user_values_are_restored(svc):
     _write_settings(json.dumps({"env": {"ANTHROPIC_MODEL": "my-model", "FOO": "1"}}, indent=2) + "\n")
     svc.one_click_setup(KEY, client=make_client(CLAUDE))
-    assert _env_of(_settings())["ANTHROPIC_MODEL"] == "claude-opus-5-5"
+    assert _env_of(_settings())["ANTHROPIC_MODEL"] == "my-model"  # foreign value is never touched
     svc.claude_set_mode("personal")
     assert _env_of(_settings()) == {"ANTHROPIC_MODEL": "my-model", "FOO": "1"}
 
@@ -321,13 +326,13 @@ def test_uninstall_removes_only_our_unchanged_values(svc):
     _write_settings(ORIGINAL)
     svc.one_click_setup(KEY, client=make_client(CLAUDE))
     data = json.loads(_settings().read_text())
-    data["env"]["ANTHROPIC_MODEL"] = "user-edited"
+    data["env"]["ANTHROPIC_AUTH_TOKEN"] = "user-edited"
     data["extra"] = True
     _settings().write_text(json.dumps(data, indent=2))
     res = svc.uninstall()
     assert res.changed
     out = json.loads(_settings().read_text())
-    assert out["env"] == {"FOO": "1", "ANTHROPIC_MODEL": "user-edited"}
+    assert out["env"] == {"FOO": "1", "ANTHROPIC_AUTH_TOKEN": "user-edited"}
     assert out["theme"] == "dark" and out["extra"] is True
     assert not _profile().exists()
     assert load_state().claude is None
@@ -686,3 +691,107 @@ def test_gui_uninstall_surfaces_key_delete_failure(svc, monkeypatch):
     assert out["ok"] and any("keychain locked" in n for n in out["notes"])
     js = (__import__("codex_setup.gui.app", fromlist=["web_dir"]).web_dir() / "app.js").read_text(encoding="utf-8")
     assert "un-result-notes" in js and "res.notes" in js
+
+
+# -- default model: /model choice must persist (no ANTHROPIC_MODEL) -----------------------
+def test_fresh_install_keeps_existing_model_key(svc):
+    _write_settings(json.dumps({"model": "sonnet"}, indent=2) + "\n")
+    raw = _settings().read_bytes()
+    svc.one_click_setup(KEY, client=make_client(CLAUDE))
+    data = json.loads(_settings().read_text())
+    assert data["model"] == "sonnet" and "ANTHROPIC_MODEL" not in data["env"]
+    svc.uninstall()
+    assert _settings().read_bytes() == raw
+
+
+def _legacy_install(svc, original):
+    """Simulate an older version: our env incl. ANTHROPIC_MODEL, no model key, old profile."""
+    if original is not None:
+        _write_settings(original)
+    svc.one_click_setup(KEY, client=make_client(CLAUDE))
+    data = json.loads(_settings().read_text())
+    old = "claude-opus-5-5"
+    data.pop("model", None)
+    data["env"]["ANTHROPIC_MODEL"] = old
+    _settings().write_text(claude_config.dumps(data))
+    prof = json.loads(_profile().read_text())
+    prof["env"]["ANTHROPIC_MODEL"] = old
+    text = claude_config.dumps(prof)
+    _profile().write_text(text)
+    st = load_state()
+    st.claude["written"]["ANTHROPIC_MODEL"] = claude_config.sha(old)
+    st.claude["profile_sha"] = claude_config.sha(text)
+    st.claude.pop("model_added", None)
+    from codex_setup.core.state import save_state
+    save_state(st)
+
+
+@pytest.mark.parametrize("via", ["mode", "setup"])
+def test_migration_removes_legacy_model_env(svc, via):
+    _legacy_install(svc, ORIGINAL)
+    if via == "mode":
+        svc.claude_set_mode("lunovant")
+    else:
+        svc.one_click_setup(KEY, client=make_client(CLAUDE))
+    data = json.loads(_settings().read_text())
+    assert "ANTHROPIC_MODEL" not in data["env"] and data["model"] == "opus"
+    assert "ANTHROPIC_MODEL" not in _env_of(_profile())
+    assert load_state().claude["model_added"] is True
+    svc.uninstall()
+    assert _settings().read_text() == ORIGINAL
+    assert not _profile().exists()
+
+
+def test_migration_keeps_foreign_model_env(svc):
+    _legacy_install(svc, ORIGINAL)
+    data = json.loads(_settings().read_text())
+    data["env"]["ANTHROPIC_MODEL"] = "my-model"
+    _settings().write_text(claude_config.dumps(data))
+    svc.claude_set_mode("lunovant")
+    assert _env_of(_settings())["ANTHROPIC_MODEL"] == "my-model"
+
+
+def test_uninstall_keeps_changed_model(svc):
+    _write_settings(ORIGINAL)
+    svc.one_click_setup(KEY, client=make_client(CLAUDE))
+    data = json.loads(_settings().read_text())
+    assert data["model"] == "opus"
+    data["model"] = "haiku"
+    _settings().write_text(claude_config.dumps(data))
+    svc.uninstall()
+    assert json.loads(_settings().read_text()) == {**json.loads(ORIGINAL), "model": "haiku"}
+
+
+def test_foreign_opus_model_env_is_never_taken(svc):
+    text = json.dumps({"env": {"ANTHROPIC_MODEL": "claude-opus-5-5", "FOO": "1"}}, indent=2) + "\n"
+    _write_settings(text)
+    raw = _settings().read_bytes()
+    svc.one_click_setup(KEY, client=make_client(CLAUDE))
+    svc.one_click_setup(KEY, client=make_client(CLAUDE))
+    assert _env_of(_settings())["ANTHROPIC_MODEL"] == "claude-opus-5-5"
+    svc.claude_set_mode("personal")
+    svc.claude_set_mode("lunovant")
+    assert _env_of(_settings())["ANTHROPIC_MODEL"] == "claude-opus-5-5"
+    svc.uninstall()
+    assert _settings().read_bytes() == raw
+
+
+def test_profile_migration_retries_after_write_failure(svc, monkeypatch):
+    _legacy_install(svc, ORIGINAL)
+    real = claude_config.write_private
+
+    def boom(path, text):
+        if path.name == "lunovant-settings.json":
+            raise OSError("disk full")
+        return real(path, text)
+
+    monkeypatch.setattr(claude_config, "write_private", boom)
+    with pytest.raises(Exception):
+        svc.claude_set_mode("lunovant")
+    monkeypatch.setattr(claude_config, "write_private", real)
+    assert "ANTHROPIC_MODEL" in _env_of(_profile())
+    svc.claude_set_mode("lunovant")
+    assert "ANTHROPIC_MODEL" not in _env_of(_profile())
+    assert load_state().claude["profile_sha"] == claude_config.sha(_profile().read_text())
+    svc.uninstall()
+    assert not _profile().exists()

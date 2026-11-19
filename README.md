@@ -33,10 +33,10 @@ Lunovant Setup provides first-class support for Claude Code (CLI and VS Code / C
 - **Environment block**: Injects the following keys inside the `"env"` object:
   - `ANTHROPIC_BASE_URL`: Base origin URL (`https://api.lunovant.tech`)
   - `ANTHROPIC_AUTH_TOKEN`: Your Lunovant API key
-  - `ANTHROPIC_MODEL`: Default model (`claude-opus-5-5`)
   - `ANTHROPIC_DEFAULT_OPUS_MODEL`: Opus 5.5 model ID (`claude-opus-5-5`)
   - `ANTHROPIC_DEFAULT_SONNET_MODEL`: Sonnet 5.5 model ID (`claude-sonnet-5-5`)
   - `ANTHROPIC_DEFAULT_HAIKU_MODEL`: Haiku 5.5 model ID (`claude-haiku-5-5`)
+- **Default model**: sets top-level `"model": "opus"` only when `settings.json` has no `model` yet (removed on uninstall if still `"opus"`). `ANTHROPIC_MODEL` is intentionally not written, so `/model sonnet` / `/model haiku` is remembered for the next sessions. Older installs are migrated automatically.
 - **Preserves existing settings**: Any existing custom configurations or non-Lunovant settings in `settings.json` are preserved untouched.
 - **Automated backup**: An automated backup of `settings.json` is created before any modifications are written.
 - **Dedicated profile file (`~/.claude/lunovant-settings.json`)**: Created with strict `0600` permissions (read/write by owner only). This allows running Claude Code with Lunovant at any time via `claude --settings ~/.claude/lunovant-settings.json`.
@@ -281,11 +281,11 @@ lunovant-setup sandbox unelevated
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.lunovant.tech",
     "ANTHROPIC_AUTH_TOKEN": "sk-...",
-    "ANTHROPIC_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"
-  }
+  },
+  "model": "opus"
 }
 ```
 

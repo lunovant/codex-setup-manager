@@ -1228,7 +1228,13 @@ class SetupService:
         if not state_last:
             save_state(state, self._env)
         if before_write is not None:
-            before_write()
+            try:
+                before_write()
+            except Exception:
+                if not state_last:  # ownership hashes must match what is on disk: roll back
+                    state.claude = old
+                    save_state(state, self._env)
+                raise
         if changed:
             if new_text is None:
                 path.unlink(missing_ok=True)
@@ -1288,7 +1294,7 @@ class SetupService:
         default = next(m for m in order if m in passing)
         final = {f: (picks[f] if picks[f] in passing else default) for f in claude_config.FAMILIES}
         origin = claude_config.origin_of(url)
-        vals = claude_config.env_values(origin, key, final, default)
+        vals = claude_config.env_values(origin, key, final)
 
         note("claude_write", model=default)
         profile = self.claude_profile_path
@@ -1298,8 +1304,10 @@ class SetupService:
             old_profile = None
 
         def mutate(data: dict[str, Any], rec: dict[str, Any]) -> None:
+            claude_config.migrate_legacy_model_env(data, rec)
             if mode == "lunovant":
                 claude_config.apply_env(data, vals, rec)
+                claude_config.apply_default_model(data, rec)
             else:
                 claude_config.remove_env(data, rec)
 
@@ -1323,7 +1331,8 @@ class SetupService:
             except OSError:
                 pass
             raise
-        message = f"Đã cài xong Claude Code. Model mặc định: {default}."
+        message = (f"Đã cài xong Claude Code. Model mặc định: {default}. "
+                   "Gõ /model sonnet hoặc /model haiku để đổi; lựa chọn được nhớ cho các lần mở sau.")
         if mode == "personal":
             message += (" Tài khoản Claude cá nhân vẫn là mặc định; gõ "
                         f"`{self.claude_profile_command()}` để dùng Lunovant.")
@@ -1343,15 +1352,31 @@ class SetupService:
         if vals is None or not rec:
             raise CodexSetupError("Lunovant for Claude Code is not set up yet. Run the setup first.")
         skipped: list[str] = []
+        extra: dict[str, Any] = {"mode": mode}
+        before_write: Callable[[], None] | None = None
+        if claude_config.LEGACY_MODEL_KEY in vals:
+            # profile written by an older version: drop ANTHROPIC_MODEL, only if the file is ours
+            try:
+                ours = claude_config.sha(self.claude_profile_path.read_bytes().decode("utf-8")) \
+                    == rec.get("profile_sha")
+            except (OSError, UnicodeDecodeError):
+                ours = False
+            vals = {k: v for k, v in vals.items() if k != claude_config.LEGACY_MODEL_KEY}
+            if ours and not dry_run:
+                new_vals = dict(vals)
+                before_write = lambda: self._write_claude_profile(new_vals)  # noqa: E731
+                extra["profile_sha"] = claude_config.sha(claude_config.profile_text(new_vals))
 
         def mutate(data: dict[str, Any], own: dict[str, Any]) -> None:
+            claude_config.migrate_legacy_model_env(data, own)
             if mode == "lunovant":
                 claude_config.apply_env(data, vals, own)
+                claude_config.apply_default_model(data, own)
             else:
                 skipped.extend(claude_config.remove_env(data, own))
 
-        res = self._claude_edit(mutate, f"claude mode {mode}", dry_run, extra={"mode": mode},
-                                state_last=(mode == "personal"))
+        res = self._claude_edit(mutate, f"claude mode {mode}", dry_run, extra=extra,
+                                state_last=(mode == "personal"), before_write=before_write)
         res.notes.extend(("un_claude_field_changed", {"field": k}) for k in skipped)
         return res
 
@@ -1361,7 +1386,11 @@ class SetupService:
             return None
         skipped: list[str] = []
         res = self._claude_edit(
-            lambda data, own: skipped.extend(claude_config.remove_env(data, own)),
+            lambda data, own: (
+                claude_config.migrate_legacy_model_env(data, own),
+                skipped.extend(claude_config.remove_env(data, own)),
+                claude_config.remove_default_model(data, own),
+            ),
             "claude uninstall", dry_run, clear=True, state_last=True)
         profile = self.claude_profile_path
         if profile.exists():

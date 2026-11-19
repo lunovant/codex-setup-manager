@@ -33,10 +33,10 @@ Lunovant Setup hỗ trợ đầy đủ và tối ưu nhất cho Claude Code (tr�
 - **Các biến môi trường**: Ghi vào mục `"env"` các giá trị sau:
   - `ANTHROPIC_BASE_URL`: Địa chỉ máy chủ Lunovant (`https://api.lunovant.tech`)
   - `ANTHROPIC_AUTH_TOKEN`: Key API Lunovant của bạn
-  - `ANTHROPIC_MODEL`: Model mặc định (`claude-opus-5-5`)
   - `ANTHROPIC_DEFAULT_OPUS_MODEL`: Mã model Opus 5.5 (`claude-opus-5-5`)
   - `ANTHROPIC_DEFAULT_SONNET_MODEL`: Mã model Sonnet 5.5 (`claude-sonnet-5-5`)
   - `ANTHROPIC_DEFAULT_HAIKU_MODEL`: Mã model Haiku 5.5 (`claude-haiku-5-5`)
+- **Model mặc định**: chỉ đặt `"model": "opus"` ở cấp cao nhất khi `settings.json` chưa có `model` (gỡ cài đặt sẽ xóa nếu vẫn là `"opus"`). Không ghi `ANTHROPIC_MODEL`, nên `/model sonnet` / `/model haiku` được nhớ cho các lần mở sau. Bản cài cũ được tự động chuyển đổi.
 - **Giữ nguyên các cài đặt khác**: Mọi thiết lập riêng hoặc tùy chỉnh cá nhân trước đây của bạn trong file `settings.json` (nằm ngoài các biến mà công cụ quản lý) đều được giữ nguyên 100%.
 - **Tự động sao lưu**: File `settings.json` luôn được sao lưu tự động trước khi ghi bất kỳ thay đổi nào.
 - **File cấu hình riêng (`~/.claude/lunovant-settings.json`)**: Được tạo với quyền bảo mật nghiêm ngặt `0600` (chỉ tài khoản của bạn đọc/ghi được). Nhờ file này, bạn luôn có thể gọi Lunovant bất cứ lúc nào bằng lệnh: `claude --settings ~/.claude/lunovant-settings.json`.
@@ -279,11 +279,11 @@ lunovant-setup sandbox unelevated
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.lunovant.tech",
     "ANTHROPIC_AUTH_TOKEN": "sk-...",
-    "ANTHROPIC_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"
-  }
+  },
+  "model": "opus"
 }
 ```
 

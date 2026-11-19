@@ -70,12 +70,12 @@ def pick_models(available: list[str]) -> dict[str, str]:
     return picks
 
 
-def env_values(origin: str, key: str, picks: Mapping[str, str], default: str | None = None) -> dict[str, str]:
-    """The ``env`` block. ``default`` is ``ANTHROPIC_MODEL`` (the opus pick unless overridden)."""
+def env_values(origin: str, key: str, picks: Mapping[str, str]) -> dict[str, str]:
+    """The ``env`` block. No ``ANTHROPIC_MODEL``: that env var would beat the ``model`` key
+    ``/model`` saves, so the user's pick would not survive a new session."""
     return {
         "ANTHROPIC_BASE_URL": origin,
         TOKEN_KEY: key,
-        "ANTHROPIC_MODEL": default or picks["opus"],
         "ANTHROPIC_DEFAULT_OPUS_MODEL": picks["opus"],
         "ANTHROPIC_DEFAULT_SONNET_MODEL": picks["sonnet"],
         "ANTHROPIC_DEFAULT_HAIKU_MODEL": picks["haiku"],
@@ -143,6 +143,43 @@ def apply_env(data: dict[str, Any], vals: Mapping[str, str], rec: dict[str, Any]
         env[k] = v
         written[k] = sha(v)
     data["env"] = env
+
+
+LEGACY_MODEL_KEY = "ANTHROPIC_MODEL"
+DEFAULT_MODEL_ALIAS = "opus"
+
+
+def migrate_legacy_model_env(data: dict[str, Any], rec: dict[str, Any]) -> None:
+    """Drop the ``env.ANTHROPIC_MODEL`` older versions wrote. Only a value that is provably ours
+    goes: its hash is in ``rec['written']`` (older versions always recorded it). A user value we displaced then comes back; anything else is left alone."""
+    written: dict[str, str] = rec.setdefault("written", {})
+    prev: dict[str, str] = rec.setdefault("prev", {})
+    env = data.get("env")
+    cur = env.get(LEGACY_MODEL_KEY) if isinstance(env, dict) else None
+    digest = written.get(LEGACY_MODEL_KEY)
+    if isinstance(env, dict) and isinstance(cur, str):
+        if digest is not None and sha(cur) == digest:  # ownership proof only, never a guess
+            del env[LEGACY_MODEL_KEY]
+            if LEGACY_MODEL_KEY in prev:
+                env[LEGACY_MODEL_KEY] = prev[LEGACY_MODEL_KEY]
+            if not env:
+                data.pop("env", None)
+    written.pop(LEGACY_MODEL_KEY, None)
+    prev.pop(LEGACY_MODEL_KEY, None)
+
+
+def apply_default_model(data: dict[str, Any], rec: dict[str, Any]) -> None:
+    """Set the top-level ``model`` to ``opus`` only when there is none, and remember that we did."""
+    if "model" not in data:
+        data["model"] = DEFAULT_MODEL_ALIAS
+        rec["model_added"] = True
+
+
+def remove_default_model(data: dict[str, Any], rec: dict[str, Any]) -> None:
+    """Undo ``apply_default_model``: only while it is still ``opus`` (a changed value is kept)."""
+    if rec.get("model_added") and data.get("model") == DEFAULT_MODEL_ALIAS:
+        del data["model"]
+    rec.pop("model_added", None)
 
 
 def _backup_token(path: Any) -> str | None:

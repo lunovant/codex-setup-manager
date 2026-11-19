@@ -512,7 +512,7 @@ class GuiApi:
                     "models": list(coc.get("models") or []),
                     "results": list(coc.get("results") or []),
                     "default_model": coc.get("default_model"),
-                    "current_model": prof.get("ANTHROPIC_MODEL"),
+                    "current_model": coc.get("default_model"),
                 }
             if not sections:
                 return {"has_last": False}
