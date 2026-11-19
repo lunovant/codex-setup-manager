@@ -11,6 +11,7 @@ import hashlib
 import os
 import re
 import shlex
+import shutil
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -22,7 +23,7 @@ import tomlkit
 from codex_setup.core import backup as backup_mod
 import json
 
-from codex_setup.core import claude_config, codex_config, paths
+from codex_setup.core import claude_config, codex_config, model_catalog, paths
 from codex_setup.core.backup import BackupInfo
 from codex_setup.core.config_store import (
     diff_text,
@@ -141,6 +142,8 @@ class OneClickResult:
     # command that always uses Lunovant.
     claude_models: dict[str, str] = field(default_factory=dict)
     profile_path: Path | None = None
+    # Codex line: model catalog outcome {"ok", "listed", "hidden", "code", "params"} (summary line)
+    catalog: dict[str, Any] = field(default_factory=dict)
     # one entry per product set up in this run ("codex" / "claude"); the top-level fields above
     # describe the first of them (Codex when present) so single-line callers keep working
     sections: dict[str, OneClickResult] = field(default_factory=dict)
@@ -172,6 +175,35 @@ class Diagnosis:
 
 
 @dataclass
+class CatalogRefresh:
+    """Outcome of :meth:`SetupService.refresh_catalog` (never holds the key)."""
+
+    changed: bool = False  # a catalog was written or removed
+    code: str = "unchanged"  # unchanged | updated | removed | skipped | foreign | no_codex | failed
+    added: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    params: dict[str, str] = field(default_factory=dict)
+    note: tuple[str, dict[str, str]] | None = None  # (i18n note code, params) when not ok
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "changed": self.changed, "code": self.code, "added": list(self.added),
+            "removed": list(self.removed), "params": dict(self.params),
+            "note": self.note[0] if self.note else None,
+        }
+
+
+@dataclass
+class _RefreshPlan:
+    base_url: str | None
+    key: str | None  # only used for the request; never logged or returned
+    stored_sold: list[str]
+    default: str
+    file: str  # "owned" | "missing" | "foreign"
+    own_sha: str | None
+
+
+@dataclass
 class _Active:
     provider_id: str | None
     env_key: str | None
@@ -193,6 +225,10 @@ class SetupService:
         self._platform: PlatformInfo | None = None
         self._install: CodexInstall | None = None
         self._legacy: tuple[str | None, list[str]] = (None, [])
+        # injectable for tests: codex binary runner / PATH lookup used by the model catalog
+        self._catalog_runner: model_catalog.Runner = model_catalog.default_runner
+        self._which: Callable[[str], str | None] = shutil.which
+        self._http_client: Any = None  # injectable httpx client for the catalog refresh (tests)
 
     # -- environment -------------------------------------------------------
     @property
@@ -293,6 +329,8 @@ class SetupService:
         if own.original_top_level is None:
             st = codex_config.get_status(doc)
             own.original_top_level = {"model": st.model, "model_provider": st.model_provider}
+            if codex_config.get_catalog(doc) is not None:  # only recorded when the user has one
+                own.original_top_level[codex_config.CATALOG_KEY] = codex_config.get_catalog(doc)
 
     # -- ChatGPT login / modes / profile file --------------------------------
     def chatgpt_login_present(self) -> bool:
@@ -336,7 +374,7 @@ class SetupService:
         """``$CODEX_HOME/lunovant.config.toml`` for ``codex -p lunovant`` (no secrets inside)."""
         path = self.profile_file
         text = self._profile_text(model)
-        if self._profile_text(model) == self._read_profile_or_none():
+        if text == self._read_profile_or_none():
             return
         atomic_write_text(path, text)
 
@@ -348,9 +386,256 @@ class SetupService:
         except (OSError, UnicodeDecodeError):
             return "\0unreadable"
 
+    def _profile_text(self, model: str) -> str:
+        values: dict[str, str] = {"model_provider": LUNOVANT.id, "model": model}
+        catalog = self._catalog_path()
+        if catalog:
+            values[codex_config.CATALOG_KEY] = catalog
+        return f"{PROFILE_HEADER}\n{tomlkit.dumps(values)}"
+
+    # -- model catalog --------------------------------------------------------
+    @property
+    def catalog_file(self) -> Path:
+        # absolute: Codex runs from other working directories than this tool
+        return Path(os.path.abspath(paths.codex_home(self._env))) / model_catalog.CATALOG_FILE
+
+    def _catalog_path(self, own: ConfigOwnership | None = None) -> str | None:
+        """Absolute path of our catalog when it is recorded in state and the file exists."""
+        own = own or self.ownership()
+        if own.model_catalog:
+            live = Path(own.model_catalog)
+            # a validated candidate that is publishing right now (unique name per build)
+            pending = any(live.parent.glob(f".{live.name}.*.candidate"))
+            if live.is_file() or pending:
+                return own.model_catalog
+        return None
+
+    def _apply_catalog(self, doc: Any, own: ConfigOwnership) -> None:
+        """Lunovant mode: ``model_catalog_json`` points at our catalog (when we have one)."""
+        path = self._catalog_path(own)
+        if path:
+            codex_config.set_catalog(doc, path)
+
     @staticmethod
-    def _profile_text(model: str) -> str:
-        return f"{PROFILE_HEADER}\n{tomlkit.dumps({'model_provider': LUNOVANT.id, 'model': model})}"
+    def _restore_catalog(doc: Any, own: ConfigOwnership) -> None:
+        """Personal mode / uninstall: back to the user's own value, else remove ours."""
+        orig = own.original_top_level or {}
+        previous = orig.get(codex_config.CATALOG_KEY)
+        current = codex_config.get_catalog(doc)
+        if previous is not None:
+            codex_config.set_catalog(doc, previous)
+        elif current is not None and current == own.model_catalog:
+            codex_config.set_catalog(doc, None)
+
+    def _catalog_owned(self, own: ConfigOwnership) -> bool:
+        """The live catalog file is ours and unchanged since we wrote it."""
+        return bool(
+            own.model_catalog == str(self.catalog_file)
+            and own.model_catalog_sha
+            and model_catalog.sha256_file(self.catalog_file) == own.model_catalog_sha
+        )
+
+    @staticmethod
+    def _remove_catalog_file(recorded: str | None, sha: str | None) -> None:
+        """Delete a catalog we wrote, only while it still has the recorded content."""
+        if not recorded or not sha:
+            return
+        path = Path(recorded)
+        if model_catalog.sha256_file(path) == sha:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    def _build_catalog(
+        self, sold: list[str], default: str, replace_ok: bool = True
+    ) -> model_catalog.CatalogResult:
+        """Build + validate a candidate against every installed Codex (never raises)."""
+        home = self.catalog_file.parent
+        try:
+            env = dict(self.env)
+            binaries = model_catalog.find_codex_binaries(
+                env=env, system=self.platform.system, home=paths._home(env),
+                which=self._which, runner=self._catalog_runner,
+            )
+            return model_catalog.create_catalog(
+                home, sold, default_model=default, env=env, binaries=binaries,
+                runner=self._catalog_runner, replace_ok=replace_ok,
+            )
+        except Exception:  # never let the catalog break setup
+            return model_catalog.CatalogResult(False, note=("catalog_failed", {"version": "?"}))
+
+    # -- catalog refresh ------------------------------------------------------
+    @staticmethod
+    def _is_sold(model: str) -> bool:
+        return model.startswith("gpt-") and not model_probe.is_excluded_model(model)
+
+    def _catalog_file_state(self, own: ConfigOwnership) -> str:
+        if self._catalog_owned(own):
+            return "owned"
+        return "foreign" if self.catalog_file.exists() else "missing"
+
+    def catalog_refresh_plan(self) -> _RefreshPlan | None:
+        """Phase 1 (fast, call under the caller's lock): what a refresh needs. ``None`` when
+        Lunovant is not installed for Codex."""
+        if not self.config_path.exists() or not self.codex_installed():
+            return None
+        state = load_state(self._env)
+        own = state.configs.get(config_key(self.config_path)) or ConfigOwnership()
+        active = self._active(ours=True)
+        table = active.table or {}
+        key = table.get(codex_config.BEARER_FIELD) or (
+            self.get_key(active.env_key) if active.env_key else None)
+        stored = [m for m in (own.model_catalog_sold or []) if self._is_sold(m)]
+        if not stored:
+            stored = [m for m in ((state.one_click or {}).get("models") or [])
+                      if isinstance(m, str) and self._is_sold(m)]
+        prof = state.profiles.get(LUNOVANT.id)
+        default = (prof.model if prof else None) or (state.one_click or {}).get(
+            "default_model") or DEFAULT_MODEL
+        return _RefreshPlan(
+            active.base_url, str(key) if key else None, stored, str(default),
+            self._catalog_file_state(own), own.model_catalog_sha,
+        )
+
+    def catalog_refresh_run(
+        self,
+        plan: _RefreshPlan,
+        *,
+        offline: bool = False,
+        client: Any = None,
+        only_if_missing: bool = False,
+    ) -> tuple[CatalogRefresh | None, model_catalog.CatalogResult | None]:
+        """Phase 2 (slow: binaries + network; touches no config/state, run it outside locks).
+        Returns ``(outcome, None)`` when there is nothing to apply, else ``(None, built)``."""
+        if plan.file == "foreign":
+            return CatalogRefresh(code="foreign", note=("catalog_foreign", {})), None
+        if only_if_missing and plan.file != "missing":
+            return CatalogRefresh(code="skipped"), None
+        env = dict(self.env)
+        try:
+            binaries = model_catalog.find_codex_binaries(
+                env=env, system=self.platform.system, home=paths._home(env),
+                which=self._which, runner=self._catalog_runner)
+        except Exception:
+            binaries = []
+        if not binaries:
+            return CatalogRefresh(code="no_codex", note=("catalog_no_codex", {})), None
+        sold: list[str] | None = None
+        if not offline and plan.key and plan.base_url:
+            fetched, err = model_probe.fetch_models_checked(
+                plan.base_url, plan.key, 10.0, client=client or self._http_client)
+            if err is None:
+                # an empty answer is not a reason to drop models: treat it like a failed fetch
+                sold = [m for m in fetched if self._is_sold(m)] or None
+        if sold is None:
+            sold = plan.stored_sold  # offline / error: never drop models
+        if not sold:
+            return CatalogRefresh(code="skipped"), None
+        built = model_catalog.create_catalog(
+            self.catalog_file.parent, sold, default_model=plan.default, env=env,
+            binaries=binaries, runner=self._catalog_runner, replace_ok=True)
+        return None, built
+
+    def catalog_refresh_apply(
+        self, plan: _RefreshPlan, built: model_catalog.CatalogResult
+    ) -> CatalogRefresh:
+        """Phase 3 (call under the caller's lock): write state/config for a built catalog."""
+        candidate = built.candidate
+        try:
+            own_now = self.ownership()
+            fresh = self.catalog_refresh_plan()
+            if (
+                fresh is None  # uninstalled meanwhile
+                or (fresh.base_url, fresh.key, fresh.default) != (plan.base_url, plan.key, plan.default)
+                or own_now.model_catalog_sha != plan.own_sha
+                or self._catalog_file_state(own_now) != plan.file
+            ):
+                return CatalogRefresh(code="skipped")  # changed meanwhile: next run decides
+            if built.ok and built.path is not None and candidate is not None:
+                return self._apply_catalog_ok(plan, built, own_now)
+            code = built.note[0] if built.note else "catalog_failed"
+            if code == "catalog_failed" and own_now.model_catalog:
+                return self._drop_catalog(built)
+            return CatalogRefresh(code="failed", note=built.note)
+        finally:
+            if candidate is not None:
+                candidate.unlink(missing_ok=True)
+
+    def _apply_catalog_ok(
+        self, plan: _RefreshPlan, built: model_catalog.CatalogResult, own_now: ConfigOwnership
+    ) -> CatalogRefresh:
+        if plan.file == "owned" and built.sha == own_now.model_catalog_sha:
+            return CatalogRefresh()  # identical: no write
+        old: list[str] = []
+        if plan.file == "owned":
+            try:
+                old = model_catalog.listed_slugs(
+                    json.loads(self.catalog_file.read_text(encoding="utf-8")))
+            except (OSError, ValueError):
+                old = []
+        new = model_catalog.listed_slugs(
+            json.loads(built.candidate.read_text(encoding="utf-8")))  # type: ignore[union-attr]
+        path = str(built.path)
+
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            own.model_catalog = path
+            own.model_catalog_sha = built.sha
+            own.model_catalog_sold = list(built.sold)
+            if codex_config.get_status(doc).model_provider == LUNOVANT.id:
+                codex_config.set_catalog(doc, path)
+
+        self._edit(mutate, "model catalog refresh", False,
+                   before_write=lambda: model_catalog.publish(built))
+        self._rewrite_profile_if_ours(self.catalog_refresh_plan_default())
+        return CatalogRefresh(
+            True, "updated", [s for s in new if s not in old], [s for s in old if s not in new])
+
+    def _drop_catalog(self, built: model_catalog.CatalogResult) -> CatalogRefresh:
+        """An installed Codex rejects our catalog: Codex must still start, so remove it."""
+        stale: list[tuple[str | None, str | None]] = []
+
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            stale.append((own.model_catalog, own.model_catalog_sha))
+            if codex_config.get_catalog(doc) == own.model_catalog:
+                self._restore_catalog(doc, own)
+            own.model_catalog = None
+            own.model_catalog_sha = None
+
+        self._edit(mutate, "model catalog removed", False)
+        for recorded, sha in stale:
+            self._remove_catalog_file(recorded, sha)
+        self._rewrite_profile_if_ours(self.catalog_refresh_plan_default())
+        params = dict(built.note[1]) if built.note else {}
+        return CatalogRefresh(True, "removed", params=params)
+
+    def catalog_refresh_plan_default(self) -> str:
+        state = load_state(self._env)
+        prof = state.profiles.get(LUNOVANT.id)
+        return str((prof.model if prof else None) or (state.one_click or {}).get(
+            "default_model") or DEFAULT_MODEL)
+
+    def _rewrite_profile_if_ours(self, model: str) -> None:
+        if self.profile_file.exists() and not self._profile_file_ours():
+            return  # never overwrite a profile file the user made
+        self._prepare_profile(model)
+        self._write_profile_file(model)
+
+    def refresh_catalog(
+        self, *, offline: bool = False, client: Any = None, only_if_missing: bool = False
+    ) -> CatalogRefresh:
+        """Keep the model catalog in line with what Lunovant sells (idempotent, safe to repeat).
+
+        Not installed -> nothing. Valid + changed -> publish; identical -> no write; rejected by
+        an installed Codex -> remove ours so Codex still starts; foreign file -> note only."""
+        plan = self.catalog_refresh_plan()
+        if plan is None:
+            return CatalogRefresh(code="skipped")
+        early, built = self.catalog_refresh_run(
+            plan, offline=offline, client=client, only_if_missing=only_if_missing)
+        if early is not None or built is None:
+            return early or CatalogRefresh(code="skipped")
+        return self.catalog_refresh_apply(plan, built)
 
     def _prepare_profile(self, model: str) -> None:
         """Back up an existing profile file before it changes. Runs BEFORE config/state are
@@ -396,22 +681,28 @@ class SetupService:
         names = [str(k) for k in tables.keys()] if isinstance(tables, dict) else []
         return removed, names
 
-    @staticmethod
-    def _enter_mode(doc: Any, own: ConfigOwnership, mode: str, model: str) -> None:
-        """Set the top-level provider/model for ``mode`` (our provider table is left as is)."""
+    def _enter_mode(self, doc: Any, own: ConfigOwnership, mode: str, model: str) -> None:
+        """Set the top-level provider/model/catalog for ``mode`` (our provider table is left as is)."""
         st = codex_config.get_status(doc)
         if st.model_provider != LUNOVANT.id and own.original_top_level is not None:
             # already on the user's own values (possibly edited since we recorded them): keep
             # the record fresh so a later round trip restores what the user has now
             own.original_top_level["model"] = st.model
             own.original_top_level["model_provider"] = st.model_provider
+            current = codex_config.get_catalog(doc)
+            if current is None:
+                own.original_top_level.pop(codex_config.CATALOG_KEY, None)
+            elif current != own.model_catalog:
+                own.original_top_level[codex_config.CATALOG_KEY] = current
         if mode == "lunovant":
             codex_config.set_active(doc, LUNOVANT.id, model)
+            self._apply_catalog(doc, own)
         elif st.model_provider != LUNOVANT.id:
             return  # personal already: leave the top-level untouched
         else:
             orig = own.original_top_level or {}
             codex_config.restore_top_level(doc, orig.get("model"), orig.get("model_provider"))
+            self._restore_catalog(doc, own)
 
     def _edit(
         self,
@@ -561,6 +852,7 @@ class SetupService:
                 self._prepare_profile(model)
             self._upsert(doc, spec, own)
             codex_config.set_active(doc, spec.id, model)
+            self._apply_catalog(doc, own)
             prev = state.profiles.get(spec.id)
             custom = list(prev.models) if prev else []
             if model not in LUNOVANT_MODELS and model not in custom:
@@ -687,6 +979,19 @@ class SetupService:
                         key_info=info, models=results)
         default = DEFAULT_MODEL if DEFAULT_MODEL in passing else passing[0]
 
+        note("catalog")
+        own0 = self.ownership()
+        stale = (own0.model_catalog, own0.model_catalog_sha)
+        replace_ok = not self.catalog_file.exists() or self._catalog_owned(own0)
+        built = self._build_catalog(list(fetched), default, replace_ok)
+        catalog_info: dict[str, Any] = (
+            {"ok": True, "listed": len(built.sold), "hidden": len(built.hidden)}
+            if built.ok else
+            {"ok": False, "code": built.note[0] if built.note else "catalog_failed",
+             "params": built.note[1] if built.note else {}}
+        )
+        catalog_path = str(built.path) if built.ok and built.path else None
+
         note("write_config", model=default)
         spec = replace(LUNOVANT, base_url=url) if url != LUNOVANT.base_url else LUNOVANT
         env_key = spec.env_key or ""
@@ -701,6 +1006,12 @@ class SetupService:
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
             self._prepare_profile(default)
             self._upsert(doc, spec, own, bearer_token=key)
+            if own.model_catalog and own.model_catalog != catalog_path:
+                self._restore_catalog(doc, own)  # drop a stale key that pointed at our old file
+            own.model_catalog = catalog_path
+            own.model_catalog_sha = built.sha if catalog_path else None
+            if catalog_path:
+                own.model_catalog_sold = list(built.sold)
             self._enter_mode(doc, own, mode, default)
             if self.sandbox_applicable():
                 st = codex_config.get_status(doc)
@@ -725,7 +1036,16 @@ class SetupService:
                 "default_model": default,
             }
 
-        saved = self._edit(mutate, "one-click setup", False)
+        try:
+            # state is saved first, then the validated candidate goes live, then config.toml
+            saved = self._edit(
+                mutate, "one-click setup", False,
+                before_write=lambda: model_catalog.publish(built))
+        finally:
+            if built.candidate is not None:
+                built.candidate.unlink(missing_ok=True)
+        if catalog_path is None:
+            self._remove_catalog_file(*stale)  # no longer referenced by config/profile
         self._write_profile_file(default)
         path = self.config_path
         removed, tables = self._legacy
@@ -741,9 +1061,12 @@ class SetupService:
         return OneClickResult(
             True, "ok", message, info, results, default, path, saved.backup,
             mode=mode, legacy_profile=removed, legacy_profile_tables=tables,
+            catalog=catalog_info,
         )
 
-    def set_mode(self, mode: str, dry_run: bool = False) -> SaveResult:
+    def set_mode(
+        self, mode: str, dry_run: bool = False, *, build_catalog: bool = True, offline: bool = False
+    ) -> SaveResult:
         """Switch the top-level provider/model between ``lunovant`` and the user's own.
 
         The provider table and ``lunovant.config.toml`` stay in both modes, so
@@ -767,7 +1090,19 @@ class SetupService:
         result = self._edit(mutate, f"mode {mode}", dry_run)
         if not dry_run and chosen:
             self._write_profile_file(chosen[0])
+            if build_catalog and mode == "lunovant":
+                note = self.build_missing_catalog(offline=offline)
+                if note:
+                    result.notes.append(note)
         return result
+
+    def build_missing_catalog(self, **kw: Any) -> tuple[str, dict[str, str]] | None:
+        """Mode switch to Lunovant: create the catalog when there is none. A failure is only a
+        note (the switch itself already succeeded)."""
+        try:
+            return self.refresh_catalog(only_if_missing=True, **kw).note
+        except Exception:
+            return ("catalog_failed", {"version": "?"})
 
     # -- Claude Code line ----------------------------------------------------
     CLAUDE_PROFILE_ARG = "~/.claude/lunovant-settings.json"
@@ -893,7 +1228,13 @@ class SetupService:
         if not state_last:
             save_state(state, self._env)
         if before_write is not None:
-            before_write()
+            try:
+                before_write()
+            except Exception:
+                if not state_last:  # ownership hashes must match what is on disk: roll back
+                    state.claude = old
+                    save_state(state, self._env)
+                raise
         if changed:
             if new_text is None:
                 path.unlink(missing_ok=True)
@@ -953,7 +1294,7 @@ class SetupService:
         default = next(m for m in order if m in passing)
         final = {f: (picks[f] if picks[f] in passing else default) for f in claude_config.FAMILIES}
         origin = claude_config.origin_of(url)
-        vals = claude_config.env_values(origin, key, final, default)
+        vals = claude_config.env_values(origin, key, final)
 
         note("claude_write", model=default)
         profile = self.claude_profile_path
@@ -963,8 +1304,10 @@ class SetupService:
             old_profile = None
 
         def mutate(data: dict[str, Any], rec: dict[str, Any]) -> None:
+            claude_config.migrate_legacy_model_env(data, rec)
             if mode == "lunovant":
                 claude_config.apply_env(data, vals, rec)
+                claude_config.apply_default_model(data, rec)
             else:
                 claude_config.remove_env(data, rec)
 
@@ -988,7 +1331,8 @@ class SetupService:
             except OSError:
                 pass
             raise
-        message = f"Đã cài xong Claude Code. Model mặc định: {default}."
+        message = (f"Đã cài xong Claude Code. Model mặc định: {default}. "
+                   "Gõ /model sonnet hoặc /model haiku để đổi; lựa chọn được nhớ cho các lần mở sau.")
         if mode == "personal":
             message += (" Tài khoản Claude cá nhân vẫn là mặc định; gõ "
                         f"`{self.claude_profile_command()}` để dùng Lunovant.")
@@ -1008,15 +1352,31 @@ class SetupService:
         if vals is None or not rec:
             raise CodexSetupError("Lunovant for Claude Code is not set up yet. Run the setup first.")
         skipped: list[str] = []
+        extra: dict[str, Any] = {"mode": mode}
+        before_write: Callable[[], None] | None = None
+        if claude_config.LEGACY_MODEL_KEY in vals:
+            # profile written by an older version: drop ANTHROPIC_MODEL, only if the file is ours
+            try:
+                ours = claude_config.sha(self.claude_profile_path.read_bytes().decode("utf-8")) \
+                    == rec.get("profile_sha")
+            except (OSError, UnicodeDecodeError):
+                ours = False
+            vals = {k: v for k, v in vals.items() if k != claude_config.LEGACY_MODEL_KEY}
+            if ours and not dry_run:
+                new_vals = dict(vals)
+                before_write = lambda: self._write_claude_profile(new_vals)  # noqa: E731
+                extra["profile_sha"] = claude_config.sha(claude_config.profile_text(new_vals))
 
         def mutate(data: dict[str, Any], own: dict[str, Any]) -> None:
+            claude_config.migrate_legacy_model_env(data, own)
             if mode == "lunovant":
                 claude_config.apply_env(data, vals, own)
+                claude_config.apply_default_model(data, own)
             else:
                 skipped.extend(claude_config.remove_env(data, own))
 
-        res = self._claude_edit(mutate, f"claude mode {mode}", dry_run, extra={"mode": mode},
-                                state_last=(mode == "personal"))
+        res = self._claude_edit(mutate, f"claude mode {mode}", dry_run, extra=extra,
+                                state_last=(mode == "personal"), before_write=before_write)
         res.notes.extend(("un_claude_field_changed", {"field": k}) for k in skipped)
         return res
 
@@ -1026,7 +1386,11 @@ class SetupService:
             return None
         skipped: list[str] = []
         res = self._claude_edit(
-            lambda data, own: skipped.extend(claude_config.remove_env(data, own)),
+            lambda data, own: (
+                claude_config.migrate_legacy_model_env(data, own),
+                skipped.extend(claude_config.remove_env(data, own)),
+                claude_config.remove_default_model(data, own),
+            ),
             "claude uninstall", dry_run, clear=True, state_last=True)
         profile = self.claude_profile_path
         if profile.exists():
@@ -1183,15 +1547,14 @@ class SetupService:
 
     # -- test --------------------------------------------------------------
     def test(self, model: str | None = None) -> ApiTestReport:
-        active = self._active()
-        bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
-        if not active.base_url or not (active.env_key or bearer):
-            raise CodexSetupError("No active provider to test. Run `lunovant-setup setup`.")
-        key = (self.get_key(active.env_key) if active.env_key else None) or bearer
-        if not key:
-            raise CodexSetupError(f"No API key found for {active.env_key}. Run `lunovant-setup api --key-stdin`.")
-        used = validate_model_name(model) if model else (active.model or DEFAULT_MODEL)
-        report = run_api_test(active.base_url, key, used)
+        target = self.test_prepare(model)
+        return self.test_record(self.test_run(target), target[2])
+
+    def test_run(self, target: tuple[str, str, str]) -> ApiTestReport:
+        """Network part of :meth:`test`; touches no config/state, safe outside any lock."""
+        return run_api_test(*target)
+
+    def test_record(self, report: ApiTestReport, used: str) -> ApiTestReport:
         state = load_state(self._env)
         state.last_test = {
             "when": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -1200,6 +1563,18 @@ class SetupService:
         }
         save_state(state, self._env)
         return report
+
+    def test_prepare(self, model: str | None = None) -> tuple[str, str, str]:
+        """Resolve ``(base_url, key, model)`` for a connection test."""
+        active = self._active()
+        bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
+        if not active.base_url or not (active.env_key or bearer):
+            raise CodexSetupError("No active provider to test. Run `lunovant-setup setup`.")
+        key = (self.get_key(active.env_key) if active.env_key else None) or bearer
+        if not key:
+            raise CodexSetupError(f"No API key found for {active.env_key}. Run `lunovant-setup api --key-stdin`.")
+        used = validate_model_name(model) if model else (active.model or DEFAULT_MODEL)
+        return (active.base_url, key, used)
 
     # -- sandbox -----------------------------------------------------------
     def sandbox_applicable(self) -> bool:
@@ -1511,6 +1886,7 @@ class SetupService:
             return SaveResult(False, "", None, dry_run)
         notes: list[tuple[str, dict[str, str]]] = []
         env_keys: list[str] = []
+        catalog_recorded: list[tuple[str | None, str | None]] = []
 
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
             st = codex_config.get_status(doc)
@@ -1540,6 +1916,10 @@ class SetupService:
                             windows_tbl = tomlkit.table()
                             doc.add("windows", windows_tbl)
                         windows_tbl["sandbox"] = value
+            self._restore_catalog(doc, own)
+            catalog_recorded.append((own.model_catalog, own.model_catalog_sha))
+            own.model_catalog = None
+            own.model_catalog_sha = None
             own.managed_provider_ids = []
             own.original_top_level = None
             own.original_snapshot = None
@@ -1553,6 +1933,8 @@ class SetupService:
         result = self._edit(mutate, "uninstall", dry_run, state_first=False)
         if not dry_run:
             self._remove_profile_file()
+            for recorded, sha in catalog_recorded:
+                self._remove_catalog_file(recorded, sha)
         result.notes = notes + result.notes
         keys = list(dict.fromkeys(env_keys))
         if delete_secret and keys:

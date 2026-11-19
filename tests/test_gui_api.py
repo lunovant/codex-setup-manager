@@ -175,7 +175,7 @@ def test_strings_same_keys():
     en, vi = gui.strings("en"), gui.strings("vi")
     assert en["ok"] and vi["ok"]
     assert set(en["strings"]) == set(vi["strings"])
-    assert en["strings"]["g_nav_quick"] != vi["strings"]["g_nav_quick"]
+    assert en["strings"]["g_nav_oneclick"] != vi["strings"]["g_nav_oneclick"]
     assert gui.strings("xx")["lang"] == "en"
     json.dumps(en)
 
@@ -373,3 +373,162 @@ def test_one_click_holds_shared_lock(gui, monkeypatch):
     gate.set()
     assert done.wait(5)
     _wait_done(gui)
+
+
+# -- detect_lines: which lines a key covers (GET /models only) -----------------------------------
+import httpx as _httpx
+
+
+def _models_client(ids=None, status=200):
+    seen: list[str] = []
+
+    def handler(req: _httpx.Request) -> _httpx.Response:
+        seen.append(req.url.path)
+        if status != 200:
+            return _httpx.Response(status)
+        return _httpx.Response(200, json={"data": [{"id": i} for i in (ids or [])]})
+
+    c = _httpx.Client(transport=_httpx.MockTransport(handler))
+    c.seen = seen  # type: ignore[attr-defined]
+    return c
+
+
+@pytest.mark.parametrize(
+    "ids,lines",
+    [
+        (["gpt-6.1-sol", "gpt-6-luna"], ["codex"]),
+        (["claude-sonnet-4"], ["claude"]),
+        (["gpt-6.1-sol", "claude-sonnet-4", "gemini-x"], ["codex", "claude"]),
+    ],
+)
+def test_detect_lines(gui, ids, lines):
+    c = _models_client(ids)
+    out = gui.detect_lines(KEY, client=c)
+    assert out == {"ok": True, "lines": lines}
+    assert c.seen == ["/v1/models"]  # no usage call, no probes
+    assert KEY not in repr(out)
+    assert not _cfg().exists()
+    assert KEY not in json.dumps(gui._svc.status().last_test or {})
+
+
+def test_detect_lines_errors(gui):
+    assert gui.detect_lines(KEY, client=_models_client([]))["error_code"] == "not_codex_key"
+    assert gui.detect_lines(KEY, client=_models_client(status=401))["error_code"] == "key_invalid"
+    assert gui.detect_lines(KEY, client=_models_client(status=500))["error_code"] == "network"
+    assert gui.detect_lines("  ")["error_code"] == "key_empty"
+    for out in (gui.detect_lines(KEY, client=_models_client([])),):
+        assert out["ok"] is False and KEY not in repr(out)
+
+
+def test_detect_lines_saves_nothing(gui):
+    gui.detect_lines(KEY, client=_models_client(["gpt-6.1-sol"]))
+    st_file = paths.state_path() if hasattr(paths, "state_path") else None
+    assert st_file is None or not st_file.exists()
+    assert gui._svc.get_key("LUNOVANT_API_KEY") is None
+
+
+def _web(name: str) -> str:
+    from codex_setup.gui.app import web_dir
+
+    return (web_dir() / name).read_text(encoding="utf-8")
+
+
+def test_removed_tabs_are_gone_from_html():
+    html = _web("index.html")
+    assert 'data-tab="quick"' not in html and 'data-tab="api"' not in html
+    for tab in ("model", "test", "sandbox", "backup", "diag", "launch", "uninstall"):
+        assert f'data-tab="{tab}"' in html
+
+
+def test_every_js_element_id_exists_in_html():
+    import re
+
+    html, js = _web("index.html"), _web("app.js")
+    ids = set(re.findall(r'\bid="([^"]+)"', html))
+    used = set(re.findall(r'\$\("([^"]+)"\)', js))
+    assert used - ids == set()
+    # ids the JS creates itself are not looked up with $(), so nothing else is allowed to be missing
+    assert not any(i.startswith(("q-", "a-")) for i in used)
+
+
+def test_gui_string_keys_used_by_web_exist():
+    import re
+
+    from codex_setup.gui import strings
+
+    assert set(strings.EN) == set(strings.VI)
+    gui = _make()
+    table = gui.strings("en")["strings"]
+    keys = set(re.findall(r'data-i18n="([^"]+)"', _web("index.html")))
+    keys |= set(re.findall(r'\bt\("([a-z0-9_]+)"', _web("app.js")))
+    assert {k for k in keys if k not in table} == set()
+
+
+def _blocked_reprobe(gui, monkeypatch):
+    """Start a reprobe whose network probe blocks; returns (entered, release, thread)."""
+    import threading
+
+    from codex_setup.core.state import AppState, save_state
+    from codex_setup.diagnostics import model_probe
+
+    _cfg().parent.mkdir(parents=True, exist_ok=True)
+    _cfg().write_text(_BEARER_CFG, encoding="utf-8")
+    st = AppState()
+    st.one_click = {"base_url": "https://api.lunovant.tech/v1", "results": [
+        {"model": "gpt-6", "ok": False, "error": "429"}]}
+    save_state(st, gui._svc._env)
+    entered, release = threading.Event(), threading.Event()
+
+    def fake(url, key, models, **kw):
+        entered.set()
+        release.wait(10)
+        return [{"model": models[0], "ok": True, "latency_ms": 5, "error": None}]
+
+    monkeypatch.setattr(model_probe, "probe_models", fake)
+    out: dict = {}
+    th = threading.Thread(target=lambda: out.update(gui.reprobe_model("gpt-6")))
+    th.start()
+    assert entered.wait(5)
+    return release, th, out
+
+
+def _call_within(fn, secs=1.0):
+    import threading
+
+    box: dict = {}
+    th = threading.Thread(target=lambda: box.update(r=fn()))
+    th.start()
+    th.join(secs)
+    assert not th.is_alive(), "API call blocked behind the network probe"
+    return box["r"]
+
+
+def test_status_not_blocked_by_reprobe(gui, monkeypatch):
+    from codex_setup.core.state import load_state
+
+    release, th, out = _blocked_reprobe(gui, monkeypatch)
+    try:
+        assert _call_within(gui.status)["ok"]
+    finally:
+        release.set()
+        th.join(5)
+    assert out["ok"] and out["result"]["ok"]
+    assert load_state(gui._svc._env).one_click["results"][0]["ok"] is True
+
+
+def test_set_mode_not_blocked_by_reprobe(gui, monkeypatch):
+    release, th, out = _blocked_reprobe(gui, monkeypatch)
+    try:
+        res = _call_within(lambda: gui.set_mode("lunovant", True))
+        assert "ok" in res
+    finally:
+        release.set()
+        th.join(5)
+
+
+def test_recheck_is_pinned_to_its_view():
+    js = _web("app.js")
+    assert "function reprobe(name, m, v)" in js
+    assert "OC.view !== v" in js.split("function reprobe(name, m, v)")[1].split("$(\"oc-go\")")[0]
+    assert "reprobe(j[0], j[1], v)" in js
+    assert "next >= total || OC.view !== v" in js

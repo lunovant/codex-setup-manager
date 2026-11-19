@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from codex_setup import __version__
-from codex_setup.app import MODES, SetupService
+from codex_setup.app import MODES, CatalogRefresh, SetupService, normalize_key, suggest_v1
 from codex_setup.core.config_store import SaveResult
 from codex_setup.core import claude_config, codex_config
 from codex_setup.core.state import load_state, save_state
@@ -28,7 +28,7 @@ from codex_setup.providers.catalog import DEFAULT_MODEL, LUNOVANT
 from codex_setup.security import launcher
 from codex_setup.security.redact import redact, redact_config_text
 from codex_setup.ui import i18n
-from codex_setup.ui.i18n import tr_check, tr_step
+from codex_setup.ui.i18n import catalog_text, tr_check, tr_step
 
 CLAUDE_URL = "https://ai.lunovant.tech"
 _LANGS = ("en", "vi")
@@ -69,12 +69,19 @@ class GuiApi:
         i18n.set_lang(self._lang)
 
     # -- plumbing ----------------------------------------------------------
-    def _guard(self, fn: Callable[[], dict[str, Any]], *secrets: str | None) -> dict[str, Any]:
+    def _guard(
+        self, fn: Callable[[], dict[str, Any]], *secrets: str | None, locked: bool = True
+    ) -> dict[str, Any]:
+        """``locked=False``: ``fn`` takes ``self._lock`` itself, only around state access,
+        so slow network I/O never blocks the other API calls."""
         for s in secrets:
             if s:
                 self._seen.append(s.strip())
         try:
-            with self._lock:
+            if locked:
+                with self._lock:
+                    out = fn()
+            else:
                 out = fn()
             out.setdefault("ok", True)
             return out
@@ -244,7 +251,11 @@ class GuiApi:
     # -- test --------------------------------------------------------------
     def test_connection(self, model: str | None = None) -> dict[str, Any]:
         def run() -> dict[str, Any]:
-            report = self._svc.test(model or None)
+            with self._lock:
+                target = self._svc.test_prepare(model or None)
+            report = self._svc.test_run(target)  # network: outside the lock
+            with self._lock:
+                self._svc.test_record(report, target[2])
             steps = []
             for s in report.steps:
                 problem = ""
@@ -267,7 +278,7 @@ class GuiApi:
                 "success": overall == Outcome.OK,
             }
 
-        return self._guard(run)
+        return self._guard(run, locked=False)
 
     # -- sandbox -----------------------------------------------------------
     def sandbox_options(self) -> dict[str, Any]:
@@ -376,7 +387,37 @@ class GuiApi:
         }
         if res.line == "claude":
             out["claude_models"] = res.claude_models
+        elif res.catalog:
+            out["catalog"] = res.catalog
+            out["catalog_text"] = catalog_text(res.catalog)
         return out
+
+    def detect_lines(
+        self, key: str | None = None, base_url: str | None = None, *, client: Any = None
+    ) -> dict[str, Any]:
+        """Which lines a key covers, from ``GET {base}/models`` only (``gpt-*`` = codex,
+        ``claude-*`` = claude). Writes nothing, stores nothing, returns no key."""
+
+        def run() -> dict[str, Any]:
+            k = normalize_key(key)
+            if not k:
+                return {"ok": False, "error_code": "key_empty"}
+            if not (k.isascii() and k.isprintable()):
+                return {"ok": False, "error_code": "key_invalid"}
+            url = suggest_v1(base_url) if base_url else LUNOVANT.base_url
+            http = {"client": client} if client is not None else {}
+            models, err = model_probe.fetch_models_checked(url, k, **http)
+            if err:
+                return {"ok": False, "error_code": err}
+            lines = [n for n, on in (
+                ("codex", any(m.startswith("gpt-") for m in models)),
+                ("claude", any(claude_config.is_claude_model(m) for m in models)),
+            ) if on]
+            if not lines:
+                return {"ok": False, "error_code": "not_codex_key"}
+            return {"ok": True, "lines": lines}
+
+        return self._scrub(self._guard(run, key, locked=False))  # pure network, no state
 
     def one_click_start(
         self, key: str | None = None, mode: str = "lunovant", claude_mode: str | None = None
@@ -471,7 +512,7 @@ class GuiApi:
                     "models": list(coc.get("models") or []),
                     "results": list(coc.get("results") or []),
                     "default_model": coc.get("default_model"),
-                    "current_model": prof.get("ANTHROPIC_MODEL"),
+                    "current_model": coc.get("default_model"),
                 }
             if not sections:
                 return {"has_last": False}
@@ -483,51 +524,98 @@ class GuiApi:
     def set_mode(self, mode: str, dry_run: bool = False, line: str = "codex") -> dict[str, Any]:
         def run() -> dict[str, Any]:
             if line == "claude":
-                if mode == "personal" and not self._svc.claude_login_present():
-                    raise ValidationError(self._gt("g_claude_mode_no_login"))
-                out = self._diff(self._svc.claude_set_mode(mode, bool(dry_run)))
-                out["mode"] = mode if not dry_run else self._svc.claude_current_mode()
-                return out
+                with self._lock:
+                    if mode == "personal" and not self._svc.claude_login_present():
+                        raise ValidationError(self._gt("g_claude_mode_no_login"))
+                    out = self._diff(self._svc.claude_set_mode(mode, bool(dry_run)))
+                    out["mode"] = mode if not dry_run else self._svc.claude_current_mode()
+                    return out
             if line != "codex":
                 raise ValidationError(f"Unknown line: {line!r}")
-            if mode == "personal" and not self._svc.chatgpt_login_present():
-                raise ValidationError(i18n.t("g_mode_no_login"))
-            out = self._diff(self._svc.set_mode(mode, bool(dry_run)))
-            out["mode"] = mode if not dry_run else self._svc.current_mode()
+            with self._lock:
+                if mode == "personal" and not self._svc.chatgpt_login_present():
+                    raise ValidationError(i18n.t("g_mode_no_login"))
+                res = self._svc.set_mode(mode, bool(dry_run), build_catalog=False)
+                out = self._diff(res)
+                out["mode"] = mode if not dry_run else self._svc.current_mode()
+            if mode == "lunovant" and not dry_run:
+                # network / binaries run outside the lock; a failure is only a note
+                try:
+                    note = self._refresh_catalog(only_if_missing=True).note
+                except Exception:
+                    note = ("catalog_failed", {"version": "?"})
+                if note:
+                    out["notes"] = list(out.get("notes") or []) + [i18n.t(note[0], **note[1])]
             return out
 
-        return self._guard(run)
+        return self._guard(run, locked=False)
+
+    def _refresh_catalog(self, *, only_if_missing: bool = False) -> CatalogRefresh:
+        """plan (locked) -> binaries + network (NOT locked) -> write (locked)."""
+        svc = self._svc
+        with self._lock:
+            plan = svc.catalog_refresh_plan()
+        if plan is None:
+            return CatalogRefresh(code="skipped")
+        if plan.key:
+            self._seen.append(plan.key)
+        early, built = svc.catalog_refresh_run(plan, only_if_missing=only_if_missing)
+        if early is not None or built is None:
+            return early or CatalogRefresh(code="skipped")
+        with self._lock:
+            return svc.catalog_refresh_apply(plan, built)
+
+    def refresh_catalog(self) -> dict[str, Any]:
+        """Called once after the window loads: keep the Codex model list in line with what
+        Lunovant sells. ``text`` is set only when something changed."""
+
+        def run() -> dict[str, Any]:
+            out = self._refresh_catalog().to_dict()
+            out["text"] = i18n.refresh_text(out)
+            return out
+
+        return self._guard(run, locked=False)
 
     def set_default_model(self, model: str) -> dict[str, Any]:
         return self._guard(lambda: self._diff(self._svc.set_default_model(model)))
 
     def _reprobe_claude(self, model_: str) -> dict[str, Any]:
         svc = self._svc
-        with self._oc_lock:
-            if self._oc["running"]:
-                raise CodexSetupError("A setup is already running.")
-            ctx = self._oc.get("ctx")
-        prof = claude_config.read_profile_env(svc.claude_profile_path)
-        if not prof:
-            raise CodexSetupError("Lunovant for Claude Code is not set up yet. Run the setup first.")
-        key = str((ctx or {}).get("key") or prof["ANTHROPIC_AUTH_TOKEN"])
-        url = prof["ANTHROPIC_BASE_URL"]
-        self._seen.append(key)
-        res = model_probe.probe_claude_models(url, key, [model_])[0]
-        if key == prof["ANTHROPIC_AUTH_TOKEN"]:
-            state = load_state(svc._env)  # fresh: never write back a stale snapshot
-            oc = (state.claude or {}).get("one_click")
-            if oc is not None:
-                rows = [r for r in oc.get("results", []) if isinstance(r, dict)]
-                old = next((r for r in rows if r.get("model") == model_), None)
-                if old is not None and old.get("role"):
-                    res["role"] = old["role"]
-                rows = [res if r.get("model") == model_ else r for r in rows]
-                if old is None:
-                    rows.append(res)
-                oc["results"] = rows
-                save_state(state, svc._env)
+        with self._lock:
+            with self._oc_lock:
+                if self._oc["running"]:
+                    raise CodexSetupError("A setup is already running.")
+                ctx = self._oc.get("ctx")
+            prof = claude_config.read_profile_env(svc.claude_profile_path)
+            if not prof:
+                raise CodexSetupError("Lunovant for Claude Code is not set up yet. Run the setup first.")
+            key = str((ctx or {}).get("key") or prof["ANTHROPIC_AUTH_TOKEN"])
+            url = prof["ANTHROPIC_BASE_URL"]
+            profile_key = prof["ANTHROPIC_AUTH_TOKEN"]
+            self._seen.append(key)
+        res = model_probe.probe_claude_models(url, key, [model_])[0]  # network: no lock held
+        with self._lock:
+            prof = claude_config.read_profile_env(svc.claude_profile_path)
+            persist = bool(prof) and key == profile_key and prof["ANTHROPIC_AUTH_TOKEN"] == key
+            if persist:
+                self._save_claude_reprobe(model_, res)
         return {"result": self._scrub(res)}
+
+    def _save_claude_reprobe(self, model_: str, res: dict[str, Any]) -> None:
+        svc = self._svc
+        state = load_state(svc._env)  # fresh: never write back a stale snapshot
+        oc = (state.claude or {}).get("one_click")
+        if oc is None:
+            return
+        rows = [r for r in oc.get("results", []) if isinstance(r, dict)]
+        old = next((r for r in rows if r.get("model") == model_), None)
+        if old is not None and old.get("role"):
+            res["role"] = old["role"]
+        rows = [res if r.get("model") == model_ else r for r in rows]
+        if old is None:
+            rows.append(res)
+        oc["results"] = rows
+        save_state(state, svc._env)
 
     def reprobe_model(self, model: str, line: str = "codex") -> dict[str, Any]:
         def run() -> dict[str, Any]:
@@ -542,43 +630,52 @@ class GuiApi:
             if model_probe.is_excluded_model(model_):
                 raise ValidationError("This model is not a chat model and is not tested.")
             svc = self._svc
-            with self._oc_lock:
-                if self._oc["running"]:
-                    raise CodexSetupError("A setup is already running.")
-                ctx = self._oc.get("ctx")
-                oc_result = self._oc.get("result")
-            active = svc._active(ours=True)
-            bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
-            persist = False
-            if ctx and oc_result is not None:
-                # Re-probe the run that is on screen with that run's own key and endpoint.
-                key, url = str(ctx["key"]), str(ctx["url"])
-                persist = bool(
-                    oc_result.get("ok") and bearer == key
-                    and _norm_url(active.base_url) == _norm_url(url)
-                )
-            else:
-                # Result restored from disk: only valid for the still-active provider/endpoint.
-                saved0 = load_state(svc._env).one_click or {}
-                if not bearer or _norm_url(saved0.get("base_url")) != _norm_url(active.base_url):
-                    raise CodexSetupError("The saved setup result is out of date. Run setup again.")
-                key, url, persist = str(bearer), str(active.base_url), True
-            self._seen.append(key)
-            res = model_probe.probe_models(url, key, [model_])[0]
+            with self._lock:  # read what the probe needs; released before any network I/O
+                with self._oc_lock:
+                    if self._oc["running"]:
+                        raise CodexSetupError("A setup is already running.")
+                    ctx = self._oc.get("ctx")
+                    oc_result = self._oc.get("result")
+                active = svc._active(ours=True)
+                bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
+                persist = False
+                if ctx and oc_result is not None:
+                    # Re-probe the run that is on screen with that run's own key and endpoint.
+                    key, url = str(ctx["key"]), str(ctx["url"])
+                    persist = bool(
+                        oc_result.get("ok") and bearer == key
+                        and _norm_url(active.base_url) == _norm_url(url)
+                    )
+                else:
+                    # Result restored from disk: only valid for the still-active provider/endpoint.
+                    saved0 = load_state(svc._env).one_click or {}
+                    if not bearer or _norm_url(saved0.get("base_url")) != _norm_url(active.base_url):
+                        raise CodexSetupError("The saved setup result is out of date. Run setup again.")
+                    key, url, persist = str(bearer), str(active.base_url), True
+                self._seen.append(key)
+            res = model_probe.probe_models(url, key, [model_])[0]  # network: no lock held
             if persist:
-                state = load_state(svc._env)  # fresh: never write back a stale snapshot
-                saved = state.one_click
-                if saved is not None and _norm_url(saved.get("base_url")) == _norm_url(url):
-                    rows = [r for r in saved.get("results", []) if isinstance(r, dict)]
-                    if any(r.get("model") == model_ for r in rows):
-                        rows = [res if r.get("model") == model_ else r for r in rows]
-                    else:
-                        rows.append(res)
-                    saved["results"] = rows
-                    save_state(state, svc._env)
+                with self._lock:
+                    # Fresh state: a mode switch during the probe must not be overwritten.
+                    now = svc._active(ours=True)
+                    still = (now.table or {}).get(codex_config.BEARER_FIELD) == key
+                    state = load_state(svc._env)
+                    saved = state.one_click
+                    if (
+                        still
+                        and saved is not None
+                        and _norm_url(saved.get("base_url")) == _norm_url(url)
+                    ):
+                        rows = [r for r in saved.get("results", []) if isinstance(r, dict)]
+                        if any(r.get("model") == model_ for r in rows):
+                            rows = [res if r.get("model") == model_ else r for r in rows]
+                        else:
+                            rows.append(res)
+                        saved["results"] = rows
+                        save_state(state, svc._env)
             return {"result": self._scrub(res)}
 
-        return self._guard(run)
+        return self._guard(run, locked=False)
 
     def open_url(self, url: str) -> dict[str, Any]:
         if url != CLAUDE_URL:

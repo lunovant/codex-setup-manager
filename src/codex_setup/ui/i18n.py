@@ -557,12 +557,21 @@ VI: dict[str, str] = {
 EN.update({
     "un_claude_field_changed": "Left env.{field} in Claude settings.json unchanged: you modified it after setup.",
     "un_claude_profile_changed": "Kept {path}: you modified it after setup.",
+    "oc_catalog_ok": "Model catalog: {n} models ({hidden} unsold models hidden)",
+    "catalog_failed": "Could not create the model catalog for Codex {version}; the model picker may lack new models.",
+    "catalog_foreign": "Kept the existing lunovant-models.json (not created by this app); skipped the model catalog.",
+    "catalog_no_codex": "No Codex installation found; skipped the model catalog (the model picker may lack new models).",
+    "catalog_updated": "Updated the model list for Codex: {changes}",
+    "catalog_added": "added {models}",
+    "catalog_dropped": "dropped {models}",
+    "catalog_removed": "Removed the model list that is no longer valid for Codex {version}.",
+    "catalog_unchanged": "The model list for Codex is up to date.",
     "oc_line_codex": "Codex",
     "oc_line_claude": "Claude Code",
     "oc_claude_models": "Models ({n} tested OK / {total} tested):",
     "oc_untested": "available (not tested)",
     "oc_profile": "Profile: {path}",
-    "oc_claude_use": "Run `{command}` in a terminal.",
+    "oc_claude_use": "Run `{command}` in a terminal. `/model sonnet` or `/model haiku` is remembered for the next sessions.",
     "mode_line": "{line}: {mode}",
     "mode_line_changed": "{line} mode: {mode}",
     "mode_none_installed": "Nothing is set up yet. Run `lunovant-setup setup --auto` first.",
@@ -570,12 +579,21 @@ EN.update({
 VI.update({
     "un_claude_field_changed": "Giữ nguyên env.{field} trong settings.json của Claude: bạn đã sửa sau khi cài đặt.",
     "un_claude_profile_changed": "Giữ nguyên {path}: bạn đã sửa sau khi cài đặt.",
+    "oc_catalog_ok": "Danh mục model: {n} model (ẩn {hidden} model không bán)",
+    "catalog_failed": "Không tạo được danh mục model cho Codex {version}; danh sách chọn model có thể thiếu model mới.",
+    "catalog_foreign": "Giữ nguyên lunovant-models.json có sẵn (không do ứng dụng tạo); bỏ qua danh mục model.",
+    "catalog_no_codex": "Không tìm thấy Codex nào; bỏ qua danh mục model (danh sách chọn model có thể thiếu model mới).",
+    "catalog_updated": "Đã cập nhật danh sách model cho Codex: {changes}",
+    "catalog_added": "thêm {models}",
+    "catalog_dropped": "gỡ {models}",
+    "catalog_removed": "Đã gỡ danh sách model không còn hợp lệ với Codex {version}.",
+    "catalog_unchanged": "Danh sách model cho Codex đã mới nhất.",
     "oc_line_codex": "Codex",
     "oc_line_claude": "Claude Code",
     "oc_claude_models": "Model ({n} chạy được / {total} đã kiểm tra):",
     "oc_untested": "có sẵn (chưa kiểm tra)",
     "oc_profile": "Profile: {path}",
-    "oc_claude_use": "Gõ `{command}` trong terminal.",
+    "oc_claude_use": "Gõ `{command}` trong terminal. `/model sonnet` hoặc `/model haiku` được nhớ cho các lần mở sau.",
     "mode_line": "{line}: {mode}",
     "mode_line_changed": "Chế độ {line}: {mode}",
     "mode_none_installed": "Chưa cài đặt gì. Hãy chạy `lunovant-setup setup --auto` trước.",
@@ -612,6 +630,29 @@ def get_lang() -> str:
 def t(key: str, **kw: object) -> str:
     text = _TABLES[_LANG].get(key) or EN.get(key) or key
     return text.format(**kw) if kw else text
+
+
+def catalog_text(info: dict | None) -> str | None:
+    """Localized one-line summary of the model catalog outcome (None = not a Codex run)."""
+    if not info:
+        return None
+    if info.get("ok"):
+        return t("oc_catalog_ok", n=info.get("listed", 0), hidden=info.get("hidden", 0))
+    return t(str(info.get("code") or "catalog_failed"), **(info.get("params") or {}))
+
+
+def refresh_text(info: dict | None) -> str | None:
+    """One info line for a catalog refresh that changed something (None = show nothing)."""
+    if not info or not info.get("changed"):
+        return None
+    if info.get("code") == "removed":
+        return t("catalog_removed", **(info.get("params") or {}))
+    parts = []
+    if info.get("added"):
+        parts.append(t("catalog_added", models=", ".join(info["added"])))
+    if info.get("removed"):
+        parts.append(t("catalog_dropped", models=", ".join(info["removed"])))
+    return t("catalog_updated", changes="; ".join(parts)) if parts else None
 
 
 def tr_step(step: object) -> str:

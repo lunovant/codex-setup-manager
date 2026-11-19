@@ -33,10 +33,10 @@ Lunovant Setup provides first-class support for Claude Code (CLI and VS Code / C
 - **Environment block**: Injects the following keys inside the `"env"` object:
   - `ANTHROPIC_BASE_URL`: Base origin URL (`https://api.lunovant.tech`)
   - `ANTHROPIC_AUTH_TOKEN`: Your Lunovant API key
-  - `ANTHROPIC_MODEL`: Default model (`claude-opus-5-5`)
   - `ANTHROPIC_DEFAULT_OPUS_MODEL`: Opus 5.5 model ID (`claude-opus-5-5`)
   - `ANTHROPIC_DEFAULT_SONNET_MODEL`: Sonnet 5.5 model ID (`claude-sonnet-5-5`)
   - `ANTHROPIC_DEFAULT_HAIKU_MODEL`: Haiku 5.5 model ID (`claude-haiku-5-5`)
+- **Default model**: sets top-level `"model": "opus"` only when `settings.json` has no `model` yet (removed on uninstall if still `"opus"`). `ANTHROPIC_MODEL` is intentionally not written, so `/model sonnet` / `/model haiku` is remembered for the next sessions. Older installs are migrated automatically.
 - **Preserves existing settings**: Any existing custom configurations or non-Lunovant settings in `settings.json` are preserved untouched.
 - **Automated backup**: An automated backup of `settings.json` is created before any modifications are written.
 - **Dedicated profile file (`~/.claude/lunovant-settings.json`)**: Created with strict `0600` permissions (read/write by owner only). This allows running Claude Code with Lunovant at any time via `claude --settings ~/.claude/lunovant-settings.json`.
@@ -130,6 +130,12 @@ Available Codex models: `gpt-6.1-sol` (default), `gpt-6.1-terra`, `gpt-6-sol`, `
 Base URL: `https://api.lunovant.tech`. API endpoint: `https://api.lunovant.tech/v1`.
 
 ---
+
+### Model list in Codex
+
+- The Codex model picker shows exactly the models Lunovant sells (a catalog file `lunovant-models.json` in `$CODEX_HOME`; Codex never asks the provider for its models).
+- Opening the app refreshes the list: new models appear, and a list that a newer Codex cannot read is removed automatically. The command line does the same with `lunovant-setup refresh-catalog` (also run before `status` / `mode`; `--offline` skips the network and keeps the last known list).
+- If Codex prints `failed to parse model_catalog_json ...`, open Lunovant Setup (it refreshes or removes the invalid list) or run `lunovant-setup refresh-catalog`.
 
 ## Supported systems
 
@@ -275,11 +281,11 @@ lunovant-setup sandbox unelevated
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.lunovant.tech",
     "ANTHROPIC_AUTH_TOKEN": "sk-...",
-    "ANTHROPIC_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5-5",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"
-  }
+  },
+  "model": "opus"
 }
 ```
 

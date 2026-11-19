@@ -68,6 +68,32 @@ def fetch_models(
             http.close()
 
 
+def fetch_models_checked(
+    base_url: str, key: str, timeout: float = 15.0, *, client: httpx.Client | None = None
+) -> tuple[list[str], str | None]:
+    """Like ``fetch_models`` but tells why it failed: ``(models, error_code)``.
+
+    Codes: ``key_invalid`` (401/403), ``network`` (transport error / other HTTP error / bad body)."""
+    base = (base_url or "").strip().rstrip("/")
+    own = client is None
+    http = client or httpx.Client(timeout=timeout, follow_redirects=True)
+    try:
+        r = http.get(f"{base}/models", headers=_headers(key))
+        if r.status_code in (401, 403):
+            return [], "key_invalid"
+        if not 200 <= r.status_code < 300:
+            return [], "network"
+        try:
+            return parse_models(r.json()), None
+        except ValueError:
+            return [], "network"
+    except Exception:
+        return [], "network"
+    finally:
+        if own:
+            http.close()
+
+
 def _error_text(status: int) -> str:
     if status == 401:
         return "401 key không hợp lệ"

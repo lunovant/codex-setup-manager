@@ -63,3 +63,16 @@ def make_config(tmp_path: Path):
         return dest
 
     return make
+
+
+@pytest.fixture(autouse=True)
+def no_real_codex(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never run a real codex binary: model-catalog tests inject a fake finder/runner."""
+    from codex_setup.core import model_catalog
+
+    monkeypatch.setattr(model_catalog, "find_codex_binaries", lambda **kw: [])
+
+    def refuse(argv, env, timeout):
+        raise AssertionError(f"tests must not run a real binary: {argv}")
+
+    monkeypatch.setattr(model_catalog, "default_runner", refuse)

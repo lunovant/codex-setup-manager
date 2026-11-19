@@ -4,6 +4,7 @@
   var STATUS = null;
   var lang = "en";
   var pending = {};
+  var DET = { seq: 0, lines: null, pending: false, timer: null };
   var OC = { running: false, view: null, timer: null };      // tab -> pending sandbox mode / backup id
 
   function $(id) { return document.getElementById(id); }
@@ -91,7 +92,6 @@
       $("nav-sandbox").hidden = !res.is_windows;
       applyStrings();
       $("m-current").textContent = res.model || t("none");
-      if (res.base_url && !$("a-url").value) $("a-url").value = res.base_url;
       if (res.is_windows) loadSandbox();
     });
   }
@@ -99,7 +99,7 @@
   function loadModels() {
     return api("models").then(function (res) {
       if (!res.ok) { fail(res); return; }
-      [$("q-model"), $("m-select")].forEach(function (sel) {
+      [$("m-select")].forEach(function (sel) {
         var keep = sel.value;
         sel.textContent = "";
         res.models.forEach(function (m) {
@@ -124,6 +124,7 @@
     say("");
     if (name === "backup") loadBackups();
     if (name === "model") loadModels();
+    $("adv-intro").hidden = name === "oneclick";
   }
 
   // -- generic preview/apply pairing ------------------------------------------
@@ -132,41 +133,6 @@
       ["input", "change"].forEach(function (ev) { el.addEventListener(ev, function () { applyBtn.disabled = true; }); });
     });
   }
-
-  // -- quick setup ------------------------------------------------------------
-  function backendOk() {
-    var file = $("q-backend").value === "file";
-    $("q-file-warn").hidden = !file;
-    return !file || $("q-file-ok").checked;
-  }
-  $("q-backend").addEventListener("change", function () { backendOk(); $("q-apply").disabled = true; });
-  $("q-file-ok").addEventListener("change", function () { backendOk(); });
-  guardApply($("q-apply"), [$("q-url"), $("q-model")]);
-  $("q-preview").addEventListener("click", function () {
-    say(t("g_working"));
-    api("preview_setup", $("q-url").value, $("q-model").value).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      say("");
-      setDiff("q-diff", res);
-      $("q-apply").disabled = false;
-    });
-  });
-  $("q-apply").addEventListener("click", function () {
-    if (!backendOk()) { say(t("file_confirm"), "error"); return; }
-    var key = $("q-key").value;
-    var btn = $("q-apply"); btn.disabled = true;
-    api("quick_setup", $("q-url").value, $("q-model").value, key || null, $("q-backend").value, false).then(function (res) {
-      if (!res.ok) { fail(res); btn.disabled = false; return; }
-      $("q-key").value = "";
-      setDiff("q-diff", res);
-      var msg = t("qs_done");
-      if (key && res.backend) msg = t("g_key_saved", { backend: res.backend }) + " " + msg;
-      if (res.backend === "session") msg += " " + t("g_session_warn");
-      if (res.backup) msg += " " + t("applied_backup", { path: res.backup });
-      say(msg, "ok");
-      refreshStatus();
-    });
-  });
 
   // -- model ------------------------------------------------------------------
   function chosenModel() { return $("m-custom").value.trim() || $("m-select").value; }
@@ -182,25 +148,6 @@
       if (!res.ok) { fail(res); return; }
       setDiff("m-diff", res); say(t("g_saved"), "ok"); $("m-apply").disabled = true;
       $("m-custom").value = ""; refreshStatus();
-    });
-  });
-
-  // -- api & key ----------------------------------------------------------------
-  guardApply($("a-apply"), [$("a-url"), $("a-key"), $("a-delete")]);
-  $("a-preview").addEventListener("click", function () {
-    api("set_api", $("a-url").value || null, null, $("a-delete").checked, true).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      setDiff("a-diff", res); $("a-apply").disabled = false;
-    });
-  });
-  $("a-apply").addEventListener("click", function () {
-    var key = $("a-key").value;
-    api("set_api", $("a-url").value || null, key || null, $("a-delete").checked, false).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      $("a-key").value = ""; $("a-delete").checked = false;
-      setDiff("a-diff", res);
-      say(key && res.backend ? t("g_key_saved", { backend: res.backend }) : t("g_saved"), "ok");
-      $("a-apply").disabled = true; refreshStatus();
     });
   });
 
@@ -516,19 +463,30 @@
   function modeCard(name) {
     var info = lineInfo(name);
     if (!info.installed) return null;
+    var cl = name === "claude";
+    var personal = info.mode === "personal";
     var card = el("div", "mode-card");
-    card.appendChild(el("h4", null, t("g_mode_title")));
-    var seg = el("div", "seg"); seg.setAttribute("role", "group");
-    var a = el("button", null, t("g_mode_lunovant")); a.type = "button";
-    var b = el("button", null, t(name === "claude" ? "g_mode_claude_personal" : "g_mode_personal")); b.type = "button";
-    a.setAttribute("aria-pressed", info.mode === "lunovant" ? "true" : "false");
-    b.setAttribute("aria-pressed", info.mode === "personal" ? "true" : "false");
-    b.disabled = !info.login;
-    a.addEventListener("click", function () { switchMode(name, "lunovant"); });
-    b.addEventListener("click", function () { switchMode(name, "personal"); });
-    seg.appendChild(a); seg.appendChild(b); card.appendChild(seg);
-    if (!info.login) card.appendChild(el("p", "hint", t(name === "claude" ? "g_claude_mode_no_login" : "g_mode_no_login")));
+    card.appendChild(el("h4", null, t(personal ? "g_cur_personal" : "g_cur_lunovant", {
+      line: t(cl ? "g_line_claude" : "g_line_codex"), account: t(cl ? "g_acct_claude" : "g_acct_chatgpt") })));
+    var b = el("button", null, t(personal ? "g_cur_to_lunovant" : (cl ? "g_cur_to_claude" : "g_cur_to_chatgpt")));
+    b.type = "button";
+    b.disabled = !personal && !info.login;
+    b.addEventListener("click", function () { switchMode(name, personal ? "lunovant" : "personal"); });
+    var r = el("div", "row"); r.appendChild(b); card.appendChild(r);
+    if (!personal && !info.login) card.appendChild(el("p", "hint", t(cl ? "g_claude_mode_no_login" : "g_mode_no_login")));
+    card.appendChild(el("p", "hint", t(cl ? "g_cur_hint_claude" : "g_cur_hint_codex")));
     return card;
+  }
+  // The only place the per-line "currently using" cards are rendered (above the key form).
+  function renderCurrent() {
+    var box = $("cur-out"); box.textContent = "";
+    var any = false;
+    LINES.forEach(function (n) {
+      var mc = modeCard(n);
+      if (mc) { box.appendChild(mc); any = true; }
+    });
+    $("un-main").hidden = !any;
+    if (!any) $("un-confirm").hidden = true;
   }
   function launchRow(v, name) {
     var sec = v.secs[name];
@@ -608,10 +566,10 @@
       var want = sec.currentModel || sec.defaultModel;
       if (cl || passing(v, name).indexOf(want) >= 0) box.appendChild(line("ok", "✓ " + t(cl ? "oc_ready_claude" : "oc_ready")));
       else box.appendChild(line("warn", "⚠ " + t("oc_default_broken", { model: want || "?" })));
+      if (!cl && sec.result.catalog_text) box.appendChild(line(sec.result.catalog && sec.result.catalog.ok ? "ok" : "warn", (sec.result.catalog && sec.result.catalog.ok ? "✓ " : "⚠ ") + sec.result.catalog_text));
     }
     if (ok) {
       box.appendChild(launchRow(v, name));
-      var mc = modeCard(name); if (mc) box.appendChild(mc);
     }
     return box;
   }
@@ -637,26 +595,51 @@
       retry.addEventListener("click", retryOC);
       r.appendChild(retry); out.appendChild(r);
     }
-    renderModeOut(shown);
-  }
-  function renderModeOut(shown) {
-    var box = $("mode-out"); box.textContent = "";
-    LINES.forEach(function (n) {
-      if (shown && shown[n]) return;
-      var mc = modeCard(n);
-      if (!mc) return;
-      var wrap = el("div", "oc-sec");
-      wrap.appendChild(el("h3", null, t(n === "claude" ? "g_line_claude" : "g_line_codex")));
-      wrap.appendChild(mc); box.appendChild(wrap);
-    });
   }
   function showForm(show) {
     $("oc-form").hidden = !show;
     $("oc-recheck-row").hidden = show || !(OC.view && OC.view.last);
   }
+  // -- key -> lines detection (decides which personal-login questions are shown) ---------------
+  function detStatus(text, cls) {
+    var p = $("oc-lines"); p.textContent = text || ""; p.hidden = !text; p.className = "hint" + (cls ? " " + cls : "");
+  }
+  function detReset() {
+    DET.seq++; DET.lines = null; DET.pending = false;
+    clearTimeout(DET.timer); detStatus("");
+    syncGo(); renderMode();
+  }
+  function detRun() {
+    var key = $("oc-key").value.trim();
+    var seq = ++DET.seq;
+    DET.pending = true; DET.lines = null; syncGo(); renderMode();
+    detStatus(t("oc_detecting"));
+    api("detect_lines", key).then(function (res) {
+      if (seq !== DET.seq) return;           // stale: the key changed meanwhile
+      DET.pending = false; syncGo();   // user now picks radios and clicks Install themselves
+      if (res.ok) {
+        DET.lines = res.lines || [];
+        var both = DET.lines.length > 1;
+        detStatus(t(both ? "oc_lines_both" : "oc_lines_" + DET.lines[0]), "ok");
+      } else {
+        DET.lines = null;
+        detStatus(errText({ code: res.error_code, message: res.error }), "warn");
+      }
+      renderMode();
+    });
+  }
+  $("oc-key").addEventListener("input", function () {
+    detReset();
+    if ($("oc-key").value.trim().length >= 20) {
+      // debounce + request both count as "checking": Install/Enter stay disabled until the result
+      DET.pending = true; syncGo(); detStatus(t("oc_detecting"));
+      DET.timer = setTimeout(detRun, 600);
+    }
+  });
+  function syncGo() { $("oc-go").disabled = OC.running || DET.pending; }
   function setRunning(on) {
     OC.running = on;
-    $("oc-go").disabled = on; $("oc-key").disabled = on; $("oc-recheck").disabled = on;
+    $("oc-go").disabled = on || DET.pending; $("oc-key").disabled = on; $("oc-recheck").disabled = on;
     $("oc-spin").hidden = !on;
     $("oc-go-text").textContent = t(on ? "oc_running" : "oc_install");
   }
@@ -668,30 +651,37 @@
       setRunning(false);
       var secs = (res.result && res.result.sections) || {};
       var anyOk = Object.keys(secs).some(function (n) { return secs[n].ok; });
-      if (res.result && res.result.ok) { $("oc-key").value = ""; showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; }
-      else { if (anyOk) $("oc-key").value = ""; showForm(true); }
+      if (res.result && res.result.ok) { $("oc-key").value = ""; detReset(); showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; }
+      else { if (anyOk) { $("oc-key").value = ""; detReset(); } showForm(true); }
       if (anyOk) { refreshStatus(); loadModels(); }
     });
   }
   function startOC(keyOverride) {
     if (OC.running) return;
+    // Detection (debounce or request) running: its result decides which questions exist.
+    if (keyOverride === undefined && DET.pending) return;  // still checking the key: no click/Enter
     var key = keyOverride !== undefined ? keyOverride : $("oc-key").value;
     say("");
     setRunning(true);
     OC.view = newView(); OC.view.checking = true; renderOC(OC.view);
+    // A hidden group never sends a choice: only a visible question yields "personal".
     var modeEl = document.querySelector("input[name=oc-mode]:checked");
-    var mode = (STATUS && STATUS.chatgpt_login && modeEl) ? modeEl.value : "lunovant";
+    var mode = (!$("oc-mode-ask").hidden && modeEl) ? modeEl.value : "lunovant";
     var cEl = document.querySelector("input[name=oc-mode-claude]:checked");
-    var cMode = (STATUS && STATUS.claude && STATUS.claude.login && cEl) ? cEl.value : "lunovant";
+    var cMode = (!$("oc-mode-ask-claude").hidden && cEl) ? cEl.value : "lunovant";
     api("one_click_start", key, mode, cMode).then(function (res) {
       if (!res.ok) { setRunning(false); say(res.busy ? t("oc_busy") : t("g_error") + ": " + (res.error || "?"), "error"); return; }
       pollOC();
     });
   }
-  function reprobe(name, m) {
-    var v = OC.view; if (!v) return Promise.resolve();
+  var RECHECK = { busy: false, max: 3 };
+  // `v` pins the call to the view it started from: a result arriving after uninstall, a new
+  // setup or loadLast replaced OC.view is dropped instead of re-rendering a stale view.
+  function reprobe(name, m, v) {
+    v = v || OC.view; if (!v || OC.view !== v) return Promise.resolve();
     v.secs[name].probes[m] = { running: true }; renderOC(v);
     return api("reprobe_model", m, name).then(function (res) {
+      if (OC.view !== v) return;
       v.secs[name].probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" };
       renderOC(v);
     });
@@ -707,16 +697,33 @@
   $("oc-change").addEventListener("click", function () { showForm(true); $("oc-key").focus(); });
   // "Check again" re-probes every tested model with the stored key (the key is never shown).
   $("oc-recheck").addEventListener("click", function () {
-    var v = OC.view; if (!v) return;
-    $("oc-recheck").disabled = true;
-    var chain = Promise.resolve();
+    var v = OC.view; if (!v || RECHECK.busy) return;
+    var jobs = [];
     LINES.forEach(function (n) {
       (v.secs[n].models || []).forEach(function (m) {
         if (v.secs[n].probes[m] && v.secs[n].probes[m].untested) return;
-        chain = chain.then(function () { return reprobe(n, m); });
+        jobs.push([n, m]);
       });
     });
-    chain.then(function () { $("oc-recheck").disabled = false; });
+    if (!jobs.length) return;
+    var btn = $("oc-recheck"), done = 0, next = 0, total = jobs.length;
+    RECHECK.busy = true; btn.disabled = true;
+    function progress() { btn.textContent = t("oc_rechecking", { done: Math.min(done + 1, total), total: total }); }
+    progress();
+    // At most RECHECK.max probes in flight; a rejected call never stalls the pool or the button.
+    function worker() {
+      if (next >= total || OC.view !== v) return Promise.resolve();  // view replaced: stop
+      var j = jobs[next++];
+      return Promise.resolve().then(function () { return reprobe(j[0], j[1], v); })
+        .catch(function () {})
+        .then(function () { done++; progress(); return worker(); });
+    }
+    var pool = [];
+    for (var i = 0; i < Math.min(RECHECK.max, total); i++) pool.push(worker());
+    Promise.all(pool).then(finish, finish);
+    function finish() {
+      RECHECK.busy = false; btn.disabled = OC.running; btn.textContent = t("oc_recheck");
+    }
   });
   function loadLast() {
     return api("one_click_last").then(function (res) {
@@ -733,9 +740,11 @@
   function renderMode() {
     var st = STATUS || {};
     var cl = st.claude || {};
-    $("oc-mode-ask").hidden = !st.chatgpt_login;
-    $("oc-mode-ask-claude").hidden = !cl.login;
-    if (OC.view) renderOC(OC.view); else renderModeOut(null);
+    var ln = DET.lines || [];
+    $("oc-mode-ask").hidden = !(st.chatgpt_login && ln.indexOf("codex") >= 0);
+    $("oc-mode-ask-claude").hidden = !(cl.login && ln.indexOf("claude") >= 0);
+    renderCurrent();
+    if (OC.view) renderOC(OC.view);
     $("howto").hidden = !(st.lunovant_installed || cl.installed);
     if (st.lunovant_installed || cl.installed) renderHowto();
   }
@@ -745,9 +754,39 @@
     api("set_mode", mode, false, name).then(function (res) {
       if (!res.ok) { fail(res); return; }
       say(t(name === "claude" ? "g_claude_mode_switched" : "g_mode_switched"), "ok");
-      refreshStatus();
+      return refreshStatus();
     });
   }
+
+  // -- uninstall from the main screen: preview -> confirm -> run ---------------------------------
+  $("un-go").addEventListener("click", function () {
+    $("un-go").disabled = true; $("un-result").hidden = true;
+    api("uninstall", true, true).then(function (res) {
+      $("un-go").disabled = false;
+      if (!res.ok) { fail(res); return; }
+      setDiff("un-main-diff", res);
+      $("un-confirm").hidden = false;
+    });
+  });
+  $("un-no").addEventListener("click", function () { $("un-confirm").hidden = true; });
+  $("un-yes").addEventListener("click", function () {
+    $("un-yes").disabled = true;
+    api("uninstall", true, false).then(function (res) {
+      $("un-yes").disabled = false;
+      if (!res.ok) { fail(res); return; }
+      $("un-confirm").hidden = true;
+      OC.view = null; $("oc-out").textContent = ""; $("oc-last").hidden = true;
+      showForm(true);
+      // Notes (failed key deletion, edited-after-setup values kept) must stay visible after the cards vanish.
+      var notes = res.notes || [];
+      var ul = $("un-result-notes"); ul.textContent = "";
+      notes.forEach(function (n) { ul.appendChild(el("li", null, n)); });
+      $("un-result-title").textContent = t(notes.length ? "g_un_main_partial" : "un_done");
+      $("un-result").hidden = false;
+      say(t(notes.length ? "g_un_main_partial" : "un_done"), notes.length ? "error" : "ok");
+      return refreshStatus();
+    });
+  });
 
   function cmdRow(text) {
     var r = el("div", "cmd");
@@ -820,7 +859,18 @@
 
   function init() {
     api("default_lang").then(function (r) { return setLang(r.lang || "en"); })
-      .then(refreshStatus).then(loadModels).then(loadLast);
+      .then(refreshStatus).then(loadModels).then(loadLast)
+      .then(refreshCatalog);
+  }
+  // Background: keep the Codex model list in line with what Lunovant sells. Shows one line
+  // only when something changed; the window stays usable meanwhile.
+  function refreshCatalog() {
+    api("refresh_catalog").then(function (res) {
+      var el = $("catalog-note");
+      if (!res.ok || !res.text) return;
+      el.textContent = res.text;
+      el.hidden = false;
+    });
   }
   if (window.pywebview && window.pywebview.api) init();
   else window.addEventListener("pywebviewready", init);

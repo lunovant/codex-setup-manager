@@ -356,11 +356,39 @@ def run_flow(base_cmd: list[str], with_codex: bool, res: Results) -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_catalog(codex: str, codex_home: Path, env: dict, res: Results) -> None:
+    """The model catalog file exists and the real Codex lists the sold models through it."""
+    catalog = codex_home / "lunovant-models.json"
+    res.check("lunovant-models.json exists", catalog.is_file(), "missing")
+    if not catalog.is_file():
+        return
+    res.check("catalog has no key", KEY not in catalog.read_text(encoding="utf-8"), "key leaked")
+    prof = load_toml(codex_home / "lunovant.config.toml")
+    res.check("profile file points at the catalog",
+              prof.get("model_catalog_json") == str(catalog), str(prof.get("model_catalog_json")))
+    # `debug models` takes no --profile: mode is lunovant here, so config.toml's top level applies
+    cmd = [codex, "debug", "models"]
+    if os.name == "nt":
+        cmd = subprocess.list2cmdline(cmd)  # type: ignore[assignment]
+    try:
+        code, out, err = run_tree(
+            cmd, env, None, 60, shell=(os.name == "nt"), cwd=str(codex_home.parent)
+        )
+        slugs = [m.get("slug") for m in json.loads(out).get("models", []) if m.get("visibility") == "list"]
+    except (OSError, ValueError) as exc:
+        res.check("codex debug models", False, str(exc))
+        return
+    res.check("codex debug models exit 0", code == 0, f"exit={code}\n{out[-300:]}\n{err}"[-1000:])
+    res.check("catalog lists gpt-6.2-sol", "gpt-6.2-sol" in slugs, str(slugs))
+    res.check("catalog hides unsold models", "gpt-5.5" not in slugs, str(slugs))
+
+
 def run_codex(server: FakeServer, codex_home: Path, env: dict, res: Results) -> None:
     codex = shutil.which("codex")
     if not codex:
         res.skip("codex exec", "`codex` not found on PATH")
         return
+    check_catalog(codex, codex_home, env, res)
     before = len(server.snapshot())
     cmd = [codex, "exec", "--skip-git-repo-check", "-p", "lunovant", "hi"]
     if os.name == "nt":

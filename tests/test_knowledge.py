@@ -2,7 +2,7 @@ from codex_setup.diagnostics.knowledge import ISSUES, lookup
 
 EXPECTED = {"provider_mismatch", "windows_setup", "sandbox_status", "unable_to_send", "unauthorized",
             "forbidden", "model_not_found", "rate_limited", "responses_incompatible", "invalid_config",
-            "env_missing", "codex_not_found"}
+            "env_missing", "codex_not_found", "model_catalog_invalid"}
 
 
 def ids(text):

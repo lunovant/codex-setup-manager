@@ -88,3 +88,6 @@ button.link { background: transparent; border: none; color: var(--accent); text-
 .oc-sec { border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px 10px; margin: 12px 0; }
 .oc-sec h3 { margin: 8px 0 4px; }
 .mode-card h4 { margin: 0 0 6px; }
+.un-main { margin: 20px 0 8px; }
+.un-main .quiet { background: none; color: var(--fg, inherit); opacity: .8; }
+.un-main .hint { margin-top: 2px; }
