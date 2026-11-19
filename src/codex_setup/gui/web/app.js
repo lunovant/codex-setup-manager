@@ -92,7 +92,6 @@
       $("nav-sandbox").hidden = !res.is_windows;
       applyStrings();
       $("m-current").textContent = res.model || t("none");
-      if (res.base_url && !$("a-url").value) $("a-url").value = res.base_url;
       if (res.is_windows) loadSandbox();
     });
   }
@@ -100,7 +99,7 @@
   function loadModels() {
     return api("models").then(function (res) {
       if (!res.ok) { fail(res); return; }
-      [$("q-model"), $("m-select")].forEach(function (sel) {
+      [$("m-select")].forEach(function (sel) {
         var keep = sel.value;
         sel.textContent = "";
         res.models.forEach(function (m) {
@@ -125,6 +124,7 @@
     say("");
     if (name === "backup") loadBackups();
     if (name === "model") loadModels();
+    $("adv-intro").hidden = name === "oneclick";
   }
 
   // -- generic preview/apply pairing ------------------------------------------
@@ -133,41 +133,6 @@
       ["input", "change"].forEach(function (ev) { el.addEventListener(ev, function () { applyBtn.disabled = true; }); });
     });
   }
-
-  // -- quick setup ------------------------------------------------------------
-  function backendOk() {
-    var file = $("q-backend").value === "file";
-    $("q-file-warn").hidden = !file;
-    return !file || $("q-file-ok").checked;
-  }
-  $("q-backend").addEventListener("change", function () { backendOk(); $("q-apply").disabled = true; });
-  $("q-file-ok").addEventListener("change", function () { backendOk(); });
-  guardApply($("q-apply"), [$("q-url"), $("q-model")]);
-  $("q-preview").addEventListener("click", function () {
-    say(t("g_working"));
-    api("preview_setup", $("q-url").value, $("q-model").value).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      say("");
-      setDiff("q-diff", res);
-      $("q-apply").disabled = false;
-    });
-  });
-  $("q-apply").addEventListener("click", function () {
-    if (!backendOk()) { say(t("file_confirm"), "error"); return; }
-    var key = $("q-key").value;
-    var btn = $("q-apply"); btn.disabled = true;
-    api("quick_setup", $("q-url").value, $("q-model").value, key || null, $("q-backend").value, false).then(function (res) {
-      if (!res.ok) { fail(res); btn.disabled = false; return; }
-      $("q-key").value = "";
-      setDiff("q-diff", res);
-      var msg = t("qs_done");
-      if (key && res.backend) msg = t("g_key_saved", { backend: res.backend }) + " " + msg;
-      if (res.backend === "session") msg += " " + t("g_session_warn");
-      if (res.backup) msg += " " + t("applied_backup", { path: res.backup });
-      say(msg, "ok");
-      refreshStatus();
-    });
-  });
 
   // -- model ------------------------------------------------------------------
   function chosenModel() { return $("m-custom").value.trim() || $("m-select").value; }
@@ -183,25 +148,6 @@
       if (!res.ok) { fail(res); return; }
       setDiff("m-diff", res); say(t("g_saved"), "ok"); $("m-apply").disabled = true;
       $("m-custom").value = ""; refreshStatus();
-    });
-  });
-
-  // -- api & key ----------------------------------------------------------------
-  guardApply($("a-apply"), [$("a-url"), $("a-key"), $("a-delete")]);
-  $("a-preview").addEventListener("click", function () {
-    api("set_api", $("a-url").value || null, null, $("a-delete").checked, true).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      setDiff("a-diff", res); $("a-apply").disabled = false;
-    });
-  });
-  $("a-apply").addEventListener("click", function () {
-    var key = $("a-key").value;
-    api("set_api", $("a-url").value || null, key || null, $("a-delete").checked, false).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      $("a-key").value = ""; $("a-delete").checked = false;
-      setDiff("a-diff", res);
-      say(key && res.backend ? t("g_key_saved", { backend: res.backend }) : t("g_saved"), "ok");
-      $("a-apply").disabled = true; refreshStatus();
     });
   });
 
@@ -517,19 +463,30 @@
   function modeCard(name) {
     var info = lineInfo(name);
     if (!info.installed) return null;
+    var cl = name === "claude";
+    var personal = info.mode === "personal";
     var card = el("div", "mode-card");
-    card.appendChild(el("h4", null, t("g_mode_title")));
-    var seg = el("div", "seg"); seg.setAttribute("role", "group");
-    var a = el("button", null, t("g_mode_lunovant")); a.type = "button";
-    var b = el("button", null, t(name === "claude" ? "g_mode_claude_personal" : "g_mode_personal")); b.type = "button";
-    a.setAttribute("aria-pressed", info.mode === "lunovant" ? "true" : "false");
-    b.setAttribute("aria-pressed", info.mode === "personal" ? "true" : "false");
-    b.disabled = !info.login;
-    a.addEventListener("click", function () { switchMode(name, "lunovant"); });
-    b.addEventListener("click", function () { switchMode(name, "personal"); });
-    seg.appendChild(a); seg.appendChild(b); card.appendChild(seg);
-    if (!info.login) card.appendChild(el("p", "hint", t(name === "claude" ? "g_claude_mode_no_login" : "g_mode_no_login")));
+    card.appendChild(el("h4", null, t(personal ? "g_cur_personal" : "g_cur_lunovant", {
+      line: t(cl ? "g_line_claude" : "g_line_codex"), account: t(cl ? "g_acct_claude" : "g_acct_chatgpt") })));
+    var b = el("button", null, t(personal ? "g_cur_to_lunovant" : (cl ? "g_cur_to_claude" : "g_cur_to_chatgpt")));
+    b.type = "button";
+    b.disabled = !personal && !info.login;
+    b.addEventListener("click", function () { switchMode(name, personal ? "lunovant" : "personal"); });
+    var r = el("div", "row"); r.appendChild(b); card.appendChild(r);
+    if (!personal && !info.login) card.appendChild(el("p", "hint", t(cl ? "g_claude_mode_no_login" : "g_mode_no_login")));
+    card.appendChild(el("p", "hint", t(cl ? "g_cur_hint_claude" : "g_cur_hint_codex")));
     return card;
+  }
+  // The only place the per-line "currently using" cards are rendered (above the key form).
+  function renderCurrent() {
+    var box = $("cur-out"); box.textContent = "";
+    var any = false;
+    LINES.forEach(function (n) {
+      var mc = modeCard(n);
+      if (mc) { box.appendChild(mc); any = true; }
+    });
+    $("un-main").hidden = !any;
+    if (!any) $("un-confirm").hidden = true;
   }
   function launchRow(v, name) {
     var sec = v.secs[name];
@@ -612,7 +569,6 @@
     }
     if (ok) {
       box.appendChild(launchRow(v, name));
-      var mc = modeCard(name); if (mc) box.appendChild(mc);
     }
     return box;
   }
@@ -638,18 +594,6 @@
       retry.addEventListener("click", retryOC);
       r.appendChild(retry); out.appendChild(r);
     }
-    renderModeOut(shown);
-  }
-  function renderModeOut(shown) {
-    var box = $("mode-out"); box.textContent = "";
-    LINES.forEach(function (n) {
-      if (shown && shown[n]) return;
-      var mc = modeCard(n);
-      if (!mc) return;
-      var wrap = el("div", "oc-sec");
-      wrap.appendChild(el("h3", null, t(n === "claude" ? "g_line_claude" : "g_line_codex")));
-      wrap.appendChild(mc); box.appendChild(wrap);
-    });
   }
   function showForm(show) {
     $("oc-form").hidden = !show;
@@ -777,7 +721,8 @@
     var ln = DET.lines || [];
     $("oc-mode-ask").hidden = !(st.chatgpt_login && ln.indexOf("codex") >= 0);
     $("oc-mode-ask-claude").hidden = !(cl.login && ln.indexOf("claude") >= 0);
-    if (OC.view) renderOC(OC.view); else renderModeOut(null);
+    renderCurrent();
+    if (OC.view) renderOC(OC.view);
     $("howto").hidden = !(st.lunovant_installed || cl.installed);
     if (st.lunovant_installed || cl.installed) renderHowto();
   }
@@ -787,9 +732,39 @@
     api("set_mode", mode, false, name).then(function (res) {
       if (!res.ok) { fail(res); return; }
       say(t(name === "claude" ? "g_claude_mode_switched" : "g_mode_switched"), "ok");
-      refreshStatus();
+      return refreshStatus();
     });
   }
+
+  // -- uninstall from the main screen: preview -> confirm -> run ---------------------------------
+  $("un-go").addEventListener("click", function () {
+    $("un-go").disabled = true; $("un-result").hidden = true;
+    api("uninstall", true, true).then(function (res) {
+      $("un-go").disabled = false;
+      if (!res.ok) { fail(res); return; }
+      setDiff("un-main-diff", res);
+      $("un-confirm").hidden = false;
+    });
+  });
+  $("un-no").addEventListener("click", function () { $("un-confirm").hidden = true; });
+  $("un-yes").addEventListener("click", function () {
+    $("un-yes").disabled = true;
+    api("uninstall", true, false).then(function (res) {
+      $("un-yes").disabled = false;
+      if (!res.ok) { fail(res); return; }
+      $("un-confirm").hidden = true;
+      OC.view = null; $("oc-out").textContent = ""; $("oc-last").hidden = true;
+      showForm(true);
+      // Notes (failed key deletion, edited-after-setup values kept) must stay visible after the cards vanish.
+      var notes = res.notes || [];
+      var ul = $("un-result-notes"); ul.textContent = "";
+      notes.forEach(function (n) { ul.appendChild(el("li", null, n)); });
+      $("un-result-title").textContent = t(notes.length ? "g_un_main_partial" : "un_done");
+      $("un-result").hidden = false;
+      say(t(notes.length ? "g_un_main_partial" : "un_done"), notes.length ? "error" : "ok");
+      return refreshStatus();
+    });
+  });
 
   function cmdRow(text) {
     var r = el("div", "cmd");

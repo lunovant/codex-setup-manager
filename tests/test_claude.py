@@ -655,3 +655,34 @@ def test_commit_failure_restores_previous_profile(svc, monkeypatch):
     with pytest.raises(Exception):
         svc.one_click_setup(KEY, client=make_client(CLAUDE, fail={"claude-opus-5-5"}))
     assert _profile().read_text() == prof
+
+
+def test_gui_uninstall_removes_codex_and_claude(svc):
+    _write_settings(ORIGINAL)
+    gui = _gui(svc, GPT + CLAUDE)
+    gui.one_click_start(KEY)
+    assert _wait(gui)["result"]["ok"]
+    assert svc.claude_installed() and gui.status()["lunovant_installed"]
+    assert "lunovant" in paths.config_path().read_text(encoding="utf-8").lower()
+    prev = gui.uninstall(True, True)
+    assert prev["ok"] and svc.claude_installed()  # dry run changes nothing
+    out = gui.uninstall(True, False)
+    assert out["ok"] and KEY not in json.dumps(out)
+    st = gui.status()
+    assert not st["claude"]["installed"] and not st["lunovant_installed"]
+    assert not _profile().exists()
+    assert "lunovant" not in paths.config_path().read_text(encoding="utf-8").lower() \
+        if paths.config_path().exists() else True
+    assert "ANTHROPIC_AUTH_TOKEN" not in json.dumps(json.loads(_settings().read_text()))
+
+
+def test_gui_uninstall_surfaces_key_delete_failure(svc, monkeypatch):
+    gui = _gui(svc, GPT + CLAUDE)
+    gui.one_click_start(KEY)
+    assert _wait(gui)["result"]["ok"]
+    monkeypatch.setattr(svc, "_delete_credentials",
+                        lambda keys: [("un_key_failed", {"keys": ", ".join(keys), "error": "keychain locked"})])
+    out = gui.uninstall(True, False)
+    assert out["ok"] and any("keychain locked" in n for n in out["notes"])
+    js = (__import__("codex_setup.gui.app", fromlist=["web_dir"]).web_dir() / "app.js").read_text(encoding="utf-8")
+    assert "un-result-notes" in js and "res.notes" in js

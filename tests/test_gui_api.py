@@ -175,7 +175,7 @@ def test_strings_same_keys():
     en, vi = gui.strings("en"), gui.strings("vi")
     assert en["ok"] and vi["ok"]
     assert set(en["strings"]) == set(vi["strings"])
-    assert en["strings"]["g_nav_quick"] != vi["strings"]["g_nav_quick"]
+    assert en["strings"]["g_nav_oneclick"] != vi["strings"]["g_nav_oneclick"]
     assert gui.strings("xx")["lang"] == "en"
     json.dumps(en)
 
@@ -425,3 +425,40 @@ def test_detect_lines_saves_nothing(gui):
     st_file = paths.state_path() if hasattr(paths, "state_path") else None
     assert st_file is None or not st_file.exists()
     assert gui._svc.get_key("LUNOVANT_API_KEY") is None
+
+
+def _web(name: str) -> str:
+    from codex_setup.gui.app import web_dir
+
+    return (web_dir() / name).read_text(encoding="utf-8")
+
+
+def test_removed_tabs_are_gone_from_html():
+    html = _web("index.html")
+    assert 'data-tab="quick"' not in html and 'data-tab="api"' not in html
+    for tab in ("model", "test", "sandbox", "backup", "diag", "launch", "uninstall"):
+        assert f'data-tab="{tab}"' in html
+
+
+def test_every_js_element_id_exists_in_html():
+    import re
+
+    html, js = _web("index.html"), _web("app.js")
+    ids = set(re.findall(r'\bid="([^"]+)"', html))
+    used = set(re.findall(r'\$\("([^"]+)"\)', js))
+    assert used - ids == set()
+    # ids the JS creates itself are not looked up with $(), so nothing else is allowed to be missing
+    assert not any(i.startswith(("q-", "a-")) for i in used)
+
+
+def test_gui_string_keys_used_by_web_exist():
+    import re
+
+    from codex_setup.gui import strings
+
+    assert set(strings.EN) == set(strings.VI)
+    gui = _make()
+    table = gui.strings("en")["strings"]
+    keys = set(re.findall(r'data-i18n="([^"]+)"', _web("index.html")))
+    keys |= set(re.findall(r'\bt\("([a-z0-9_]+)"', _web("app.js")))
+    assert {k for k in keys if k not in table} == set()

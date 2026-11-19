@@ -4,9 +4,7 @@ from __future__ import annotations
 
 EN: dict[str, str] = {
     "g_lang": "Language",
-    "g_nav_quick": "Quick Setup",
     "g_nav_model": "Model",
-    "g_nav_api": "API & key",
     "g_nav_test": "Test connection",
     "g_nav_sandbox": "Windows Sandbox",
     "g_nav_backup": "Backup & Restore",
@@ -16,23 +14,13 @@ EN: dict[str, str] = {
     "g_preview": "Preview",
     "g_apply": "Apply",
     "g_refresh": "Refresh",
-    "g_key_label": "API key",
     "g_key_hint": "The key is never displayed and is cleared from this form after saving.",
-    "g_backend_label": "Where to store the key",
-    "g_backend_auto": "auto (OS keychain, falls back to this session only)",
-    "g_backend_keyring": "OS keychain only",
-    "g_backend_session": "session (memory only, lost on exit)",
-    "g_backend_file": "file (PLAINTEXT on disk)",
-    "g_file_confirm_box": "I understand the key will be stored in plaintext on disk",
-    "g_diff_title": "Proposed changes (nothing is written until you press Apply)",
     "g_no_diff": "No changes needed.",
     "g_saved": "Saved.",
-    "g_key_saved": "API key saved ({backend}).",
     "g_working": "Working...",
     "g_model_current": "Current model",
     "g_model_select": "Model",
     "g_model_custom": "Custom model name",
-    "g_delete_key": "Delete the stored key",
     "g_run_test": "Run test",
     "g_col_step": "Step",
     "g_col_result": "Result",
@@ -73,14 +61,11 @@ EN: dict[str, str] = {
     "g_skip": "SKIP",
     "g_windows_only_hint": "Windows only",
     "g_experimental": "experimental",
-    "g_session_warn": "The key is kept in memory only; it is lost when this window closes.",
 }
 
 VI: dict[str, str] = {
     "g_lang": "Ngôn ngữ",
-    "g_nav_quick": "Cài đặt nhanh",
     "g_nav_model": "Model",
-    "g_nav_api": "API & key",
     "g_nav_test": "Kiểm tra kết nối",
     "g_nav_sandbox": "Windows Sandbox",
     "g_nav_backup": "Sao lưu & Khôi phục",
@@ -90,23 +75,13 @@ VI: dict[str, str] = {
     "g_preview": "Xem trước",
     "g_apply": "Áp dụng",
     "g_refresh": "Làm mới",
-    "g_key_label": "API key",
     "g_key_hint": "Key không bao giờ được hiển thị và sẽ được xoá khỏi form sau khi lưu.",
-    "g_backend_label": "Nơi lưu key",
-    "g_backend_auto": "auto (kho khoá hệ điều hành, nếu không có thì chỉ trong phiên này)",
-    "g_backend_keyring": "Chỉ kho khoá hệ điều hành",
-    "g_backend_session": "session (chỉ trong bộ nhớ, mất khi thoát)",
-    "g_backend_file": "file (VĂN BẢN THƯỜNG trên đĩa)",
-    "g_file_confirm_box": "Tôi hiểu key sẽ được lưu dạng văn bản thường trên đĩa",
-    "g_diff_title": "Thay đổi dự kiến (chưa ghi gì cho đến khi bấm Áp dụng)",
     "g_no_diff": "Không cần thay đổi.",
     "g_saved": "Đã lưu.",
-    "g_key_saved": "Đã lưu API key ({backend}).",
     "g_working": "Đang xử lý...",
     "g_model_current": "Model hiện tại",
     "g_model_select": "Model",
     "g_model_custom": "Tên model tuỳ chỉnh",
-    "g_delete_key": "Xoá key đã lưu",
     "g_run_test": "Chạy kiểm tra",
     "g_col_step": "Bước",
     "g_col_result": "Kết quả",
@@ -147,7 +122,6 @@ VI: dict[str, str] = {
     "g_skip": "BỎ QUA",
     "g_windows_only_hint": "Chỉ Windows",
     "g_experimental": "thử nghiệm",
-    "g_session_warn": "Key chỉ nằm trong bộ nhớ; sẽ mất khi đóng cửa sổ này.",
 }
 
 EN["g_cli_needs_terminal"] = (
@@ -162,7 +136,7 @@ VI["g_cli_needs_terminal"] = (
 EN.update(
 {
     "g_nav_oneclick": "One-click setup",
-    "g_nav_advanced": "Codex advanced",
+    "g_nav_advanced": "Technical tools (rarely needed)",
     "oc_title": "One-click setup",
     "oc_key_label": "Paste your Lunovant key",
     "oc_install": "Install",
@@ -207,7 +181,7 @@ EN.update(
 VI.update(
 {
     "g_nav_oneclick": "Cài đặt nhanh",
-    "g_nav_advanced": "Codex nâng cao",
+    "g_nav_advanced": "Công cụ kỹ thuật (thường không cần)",
     "oc_title": "Cài đặt nhanh",
     "oc_key_label": "Dán key Lunovant",
     "oc_install": "Cài đặt",
@@ -255,9 +229,6 @@ VI["oc_pick_model"] = "Chọn model đang chạy được..."
 VI["oc_default_broken"] = "Model mặc định {model} không còn chạy được. Hãy chọn model khác bên dưới."
 
 EN.update({
-    "g_mode_title": "Current mode",
-    "g_mode_lunovant": "Lunovant",
-    "g_mode_personal": "ChatGPT account",
     "g_mode_no_login": "No ChatGPT login detected. Sign in to Codex with ChatGPT first to use this mode.",
     "g_mode_switched": "Switched. Close and reopen Codex Desktop / VS Code to apply. Chat history is split by mode: old chats of the other mode reappear when you switch back.",
     "g_mode_ask_title": "A ChatGPT login was found on this computer. Which one should be the default?",
@@ -282,9 +253,6 @@ EN.update({
     "g_no_expiry": "no expiry",
 })
 VI.update({
-    "g_mode_title": "Chế độ đang dùng",
-    "g_mode_lunovant": "Lunovant",
-    "g_mode_personal": "Tài khoản ChatGPT",
     "g_mode_no_login": "Chưa phát hiện đăng nhập ChatGPT. Hãy đăng nhập Codex bằng ChatGPT trước để dùng chế độ này.",
     "g_mode_switched": "Đã chuyển. Đóng và mở lại Codex Desktop / VS Code để áp dụng. Lịch sử chat được tách theo chế độ: chat cũ của chế độ kia sẽ hiện lại khi bạn chuyển về.",
     "g_mode_ask_title": "Máy này đang đăng nhập ChatGPT. Bạn muốn mặc định dùng cái nào?",
@@ -324,7 +292,6 @@ EN.update({
     "g_claude_not_found": "Claude Code was not found on this computer. Install Claude Code first, then try again.",
     "g_claude_mode_no_login": "No personal Claude login detected. Sign in to Claude Code first to use this mode.",
     "g_claude_mode_switched": "Switched. Restart Claude Code (or reload the VS Code / Cursor window) to apply.",
-    "g_mode_claude_personal": "Claude account",
     "g_mode_ask_claude_title": "A personal Claude login was found on this computer. Which one should be the default for Claude Code?",
     "g_mode_ask_claude_lunovant": "Lunovant as the default for Claude Code (terminal and IDE)",
     "g_mode_ask_claude_personal": "Keep my Claude account as the default; use Lunovant only via `claude --settings ~/.claude/lunovant-settings.json`",
@@ -351,7 +318,6 @@ VI.update({
     "g_claude_not_found": "Không tìm thấy Claude Code trên máy này. Hãy cài Claude Code trước rồi thử lại.",
     "g_claude_mode_no_login": "Chưa phát hiện đăng nhập Claude cá nhân. Hãy đăng nhập Claude Code trước để dùng chế độ này.",
     "g_claude_mode_switched": "Đã chuyển. Hãy khởi động lại Claude Code (hoặc reload cửa sổ VS Code / Cursor) để áp dụng.",
-    "g_mode_claude_personal": "Tài khoản Claude",
     "g_mode_ask_claude_title": "Máy này đang đăng nhập Claude cá nhân. Bạn muốn mặc định dùng cái nào cho Claude Code?",
     "g_mode_ask_claude_lunovant": "Lunovant mặc định cho Claude Code (terminal & IDE)",
     "g_mode_ask_claude_personal": "Giữ tài khoản Claude làm mặc định, chỉ dùng Lunovant khi gõ `claude --settings ~/.claude/lunovant-settings.json`",
@@ -362,4 +328,40 @@ VI.update({
     "g_howto_claude_ide_t": "VS Code / Cursor (extension Claude Code)",
     "g_howto_claude_ide": "Extension dùng chung settings.json nên không cần cài thêm gì. Reload cửa sổ sau khi chuyển chế độ.",
     "g_howto_claude_desktop": "App chat Claude trên máy tính không dùng được Lunovant: chỉ Claude Code dùng được.",
+})
+
+EN.update({
+    "g_adv_intro": "For technical support: edit the Codex config by hand, fix the Windows sandbox, restore backups, diagnose errors. A normal setup only needs the One-click setup screen.",
+    "g_cancel": "Cancel",
+    "g_cur_lunovant": "{line} is using: Lunovant",
+    "g_cur_personal": "{line} is using: {account}",
+    "g_acct_chatgpt": "your ChatGPT account",
+    "g_acct_claude": "your Claude account",
+    "g_cur_to_chatgpt": "Switch back to my ChatGPT account",
+    "g_cur_to_claude": "Switch back to my Claude account",
+    "g_cur_to_lunovant": "Switch to Lunovant",
+    "g_cur_hint_codex": "Only the app/IDE need a restart: Codex desktop app: quit and reopen; VS Code: Reload Window; terminal: start a new session. `codex -p lunovant` always uses Lunovant, even in personal mode.",
+    "g_cur_hint_claude": "Only the app/IDE need a restart: VS Code: Reload Window; terminal: start a new session. `claude --settings ~/.claude/lunovant-settings.json` always uses Lunovant, even in personal mode.",
+    "g_un_main_btn": "Remove Lunovant from this computer",
+    "g_un_main_sub": "Restores the configuration as it was before setup; the stored key will be deleted (Codex and Claude Code).",
+    "g_un_main_partial": "Removed, but some items need your attention:",
+    "g_un_main_confirm": "Remove Lunovant and delete the stored key? These are the changes:",
+})
+
+VI.update({
+    "g_adv_intro": "Dành cho hỗ trợ kỹ thuật: chỉnh tay cấu hình Codex, sửa sandbox Windows, khôi phục bản sao lưu, chẩn đoán lỗi. Cài đặt thông thường chỉ cần màn hình Cài đặt nhanh.",
+    "g_cancel": "Huỷ",
+    "g_cur_lunovant": "{line} đang dùng: Lunovant",
+    "g_cur_personal": "{line} đang dùng: {account}",
+    "g_acct_chatgpt": "tài khoản ChatGPT của bạn",
+    "g_acct_claude": "tài khoản Claude của bạn",
+    "g_cur_to_chatgpt": "Chuyển về tài khoản ChatGPT",
+    "g_cur_to_claude": "Chuyển về tài khoản Claude",
+    "g_cur_to_lunovant": "Chuyển sang Lunovant",
+    "g_cur_hint_codex": "Chỉ app/IDE cần khởi động lại: app Codex desktop: thoát rồi mở lại; VS Code: Reload Window; terminal: mở phiên mới. `codex -p lunovant` luôn dùng Lunovant, kể cả ở chế độ cá nhân.",
+    "g_cur_hint_claude": "Chỉ app/IDE cần khởi động lại: VS Code: Reload Window; terminal: mở phiên mới. `claude --settings ~/.claude/lunovant-settings.json` luôn dùng Lunovant, kể cả ở chế độ cá nhân.",
+    "g_un_main_btn": "Gỡ Lunovant khỏi máy này",
+    "g_un_main_sub": "Trả lại cấu hình như trước khi cài; key đã lưu sẽ bị xoá (cả Codex và Claude Code).",
+    "g_un_main_partial": "Đã gỡ, nhưng có mục cần bạn chú ý:",
+    "g_un_main_confirm": "Gỡ Lunovant và xoá key đã lưu? Các thay đổi sẽ là:",
 })
