@@ -566,6 +566,7 @@
       var want = sec.currentModel || sec.defaultModel;
       if (cl || passing(v, name).indexOf(want) >= 0) box.appendChild(line("ok", "✓ " + t(cl ? "oc_ready_claude" : "oc_ready")));
       else box.appendChild(line("warn", "⚠ " + t("oc_default_broken", { model: want || "?" })));
+      if (!cl && sec.result.catalog_text) box.appendChild(line(sec.result.catalog && sec.result.catalog.ok ? "ok" : "warn", (sec.result.catalog && sec.result.catalog.ok ? "✓ " : "⚠ ") + sec.result.catalog_text));
     }
     if (ok) {
       box.appendChild(launchRow(v, name));

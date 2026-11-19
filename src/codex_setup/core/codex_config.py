@@ -275,6 +275,22 @@ def restore_top_level(doc: TOMLDocument, model: str | None, model_provider: str 
             _set_top_level(doc, key, value)
 
 
+CATALOG_KEY = "model_catalog_json"
+
+
+def get_catalog(doc: TOMLDocument) -> str | None:
+    value = doc.get(CATALOG_KEY)
+    return str(value) if isinstance(value, str) else None
+
+
+def set_catalog(doc: TOMLDocument, path: str | None) -> None:
+    """Top-level ``model_catalog_json`` (None removes it)."""
+    if path is None:
+        _remove_top_level(doc, CATALOG_KEY)
+    else:
+        _set_top_level(doc, CATALOG_KEY, path)
+
+
 def set_windows_sandbox(
     doc: TOMLDocument, mode: Literal["elevated", "unelevated"] | None
 ) -> None:
@@ -305,6 +321,9 @@ __all__ = [
     "RESERVED_PROVIDER_IDS",
     "ConfigStatus",
     "PROVIDER_FIELDS",
+    "CATALOG_KEY",
+    "get_catalog",
+    "set_catalog",
     "get_status",
     "provider_fields",
     "restore_provider_fields",

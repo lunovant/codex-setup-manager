@@ -66,6 +66,10 @@ class ConfigOwnership:
     bearer_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
     # legacy top-level `profile = ...` we removed ({"value", "tables"}); reported, never restored
     legacy_profile: dict[str, Any] | None = None
+    # absolute path of the model catalog file (lunovant-models.json) this tool created
+    model_catalog: str | None = None
+    # sha256 of the catalog we wrote: the file is replaced/removed only while it still matches
+    model_catalog_sha: str | None = None
 
     def is_empty(self) -> bool:
         return not (
@@ -77,6 +81,7 @@ class ConfigOwnership:
             or self.credentials
             or self.env_installs
             or self.bearer_tokens
+            or self.model_catalog is not None
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,6 +95,8 @@ class ConfigOwnership:
             "env_installs": self.env_installs,
             "bearer_tokens": self.bearer_tokens,
             "legacy_profile": self.legacy_profile,
+            "model_catalog": self.model_catalog,
+            "model_catalog_sha": self.model_catalog_sha,
         }
 
     @classmethod
@@ -125,7 +132,14 @@ class ConfigOwnership:
         legacy = d.get("legacy_profile")
         if legacy is not None:
             _expect(legacy, dict, "legacy_profile")
-        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer, legacy)
+        catalog = d.get("model_catalog")
+        if catalog is not None:
+            _expect(catalog, str, "model_catalog")
+        sha = d.get("model_catalog_sha")
+        if sha is not None:
+            _expect(sha, str, "model_catalog_sha")
+        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer, legacy,
+                   catalog, sha)
 
 
 def _expect(value: Any, typ: type, what: str) -> Any:

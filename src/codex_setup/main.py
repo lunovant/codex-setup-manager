@@ -16,7 +16,7 @@ from codex_setup.core.config_store import SaveResult
 from codex_setup.core.errors import CodexSetupError, ValidationError
 from codex_setup.providers.catalog import DEFAULT_MODEL, normalize_base_url, suggest_v1
 from codex_setup.security.redact import mask_key, redact, redact_config_text
-from codex_setup.ui.i18n import default_lang, set_lang, t, tr_check, tr_step
+from codex_setup.ui.i18n import default_lang, set_lang, t, tr_check, tr_step, catalog_text
 
 _SEEN_SECRETS: list[str] = []
 
@@ -282,6 +282,9 @@ def _print_line(svc: SetupService, name: str, res: Any) -> None:
         _out(t("oc_claude_use", command=svc.claude_launch_command(res.mode)))
     if res.legacy_profile:
         _out(t("legacy_profile_removed", value=res.legacy_profile))
+    text = catalog_text(res.catalog)
+    if text:
+        _out(text)
     _out(t("oc_ok"))
 
 

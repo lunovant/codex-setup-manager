@@ -557,6 +557,10 @@ VI: dict[str, str] = {
 EN.update({
     "un_claude_field_changed": "Left env.{field} in Claude settings.json unchanged: you modified it after setup.",
     "un_claude_profile_changed": "Kept {path}: you modified it after setup.",
+    "oc_catalog_ok": "Model catalog: {n} models ({hidden} unsold models hidden)",
+    "catalog_failed": "Could not create the model catalog for Codex {version}; the model picker may lack new models.",
+    "catalog_foreign": "Kept the existing lunovant-models.json (not created by this app); skipped the model catalog.",
+    "catalog_no_codex": "No Codex installation found; skipped the model catalog (the model picker may lack new models).",
     "oc_line_codex": "Codex",
     "oc_line_claude": "Claude Code",
     "oc_claude_models": "Models ({n} tested OK / {total} tested):",
@@ -570,6 +574,10 @@ EN.update({
 VI.update({
     "un_claude_field_changed": "Giữ nguyên env.{field} trong settings.json của Claude: bạn đã sửa sau khi cài đặt.",
     "un_claude_profile_changed": "Giữ nguyên {path}: bạn đã sửa sau khi cài đặt.",
+    "oc_catalog_ok": "Danh mục model: {n} model (ẩn {hidden} model không bán)",
+    "catalog_failed": "Không tạo được danh mục model cho Codex {version}; danh sách chọn model có thể thiếu model mới.",
+    "catalog_foreign": "Giữ nguyên lunovant-models.json có sẵn (không do ứng dụng tạo); bỏ qua danh mục model.",
+    "catalog_no_codex": "Không tìm thấy Codex nào; bỏ qua danh mục model (danh sách chọn model có thể thiếu model mới).",
     "oc_line_codex": "Codex",
     "oc_line_claude": "Claude Code",
     "oc_claude_models": "Model ({n} chạy được / {total} đã kiểm tra):",
@@ -612,6 +620,15 @@ def get_lang() -> str:
 def t(key: str, **kw: object) -> str:
     text = _TABLES[_LANG].get(key) or EN.get(key) or key
     return text.format(**kw) if kw else text
+
+
+def catalog_text(info: dict | None) -> str | None:
+    """Localized one-line summary of the model catalog outcome (None = not a Codex run)."""
+    if not info:
+        return None
+    if info.get("ok"):
+        return t("oc_catalog_ok", n=info.get("listed", 0), hidden=info.get("hidden", 0))
+    return t(str(info.get("code") or "catalog_failed"), **(info.get("params") or {}))
 
 
 def tr_step(step: object) -> str:

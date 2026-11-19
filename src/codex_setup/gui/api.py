@@ -28,7 +28,7 @@ from codex_setup.providers.catalog import DEFAULT_MODEL, LUNOVANT
 from codex_setup.security import launcher
 from codex_setup.security.redact import redact, redact_config_text
 from codex_setup.ui import i18n
-from codex_setup.ui.i18n import tr_check, tr_step
+from codex_setup.ui.i18n import catalog_text, tr_check, tr_step
 
 CLAUDE_URL = "https://ai.lunovant.tech"
 _LANGS = ("en", "vi")
@@ -376,6 +376,9 @@ class GuiApi:
         }
         if res.line == "claude":
             out["claude_models"] = res.claude_models
+        elif res.catalog:
+            out["catalog"] = res.catalog
+            out["catalog_text"] = catalog_text(res.catalog)
         return out
 
     def detect_lines(
