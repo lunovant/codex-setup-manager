@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from codex_setup import __version__
-from codex_setup.app import MODES, SetupService
+from codex_setup.app import MODES, SetupService, normalize_key, suggest_v1
 from codex_setup.core.config_store import SaveResult
 from codex_setup.core import claude_config, codex_config
 from codex_setup.core.state import load_state, save_state
@@ -377,6 +377,33 @@ class GuiApi:
         if res.line == "claude":
             out["claude_models"] = res.claude_models
         return out
+
+    def detect_lines(
+        self, key: str | None = None, base_url: str | None = None, *, client: Any = None
+    ) -> dict[str, Any]:
+        """Which lines a key covers, from ``GET {base}/models`` only (``gpt-*`` = codex,
+        ``claude-*`` = claude). Writes nothing, stores nothing, returns no key."""
+
+        def run() -> dict[str, Any]:
+            k = normalize_key(key)
+            if not k:
+                return {"ok": False, "error_code": "key_empty"}
+            if not (k.isascii() and k.isprintable()):
+                return {"ok": False, "error_code": "key_invalid"}
+            url = suggest_v1(base_url) if base_url else LUNOVANT.base_url
+            http = {"client": client} if client is not None else {}
+            models, err = model_probe.fetch_models_checked(url, k, **http)
+            if err:
+                return {"ok": False, "error_code": err}
+            lines = [n for n, on in (
+                ("codex", any(m.startswith("gpt-") for m in models)),
+                ("claude", any(claude_config.is_claude_model(m) for m in models)),
+            ) if on]
+            if not lines:
+                return {"ok": False, "error_code": "not_codex_key"}
+            return {"ok": True, "lines": lines}
+
+        return self._scrub(self._guard(run, key))
 
     def one_click_start(
         self, key: str | None = None, mode: str = "lunovant", claude_mode: str | None = None

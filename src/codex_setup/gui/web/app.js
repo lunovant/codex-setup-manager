@@ -4,6 +4,7 @@
   var STATUS = null;
   var lang = "en";
   var pending = {};
+  var DET = { seq: 0, lines: null, pending: false, timer: null };
   var OC = { running: false, view: null, timer: null };      // tab -> pending sandbox mode / backup id
 
   function $(id) { return document.getElementById(id); }
@@ -654,9 +655,46 @@
     $("oc-form").hidden = !show;
     $("oc-recheck-row").hidden = show || !(OC.view && OC.view.last);
   }
+  // -- key -> lines detection (decides which personal-login questions are shown) ---------------
+  function detStatus(text, cls) {
+    var p = $("oc-lines"); p.textContent = text || ""; p.hidden = !text; p.className = "hint" + (cls ? " " + cls : "");
+  }
+  function detReset() {
+    DET.seq++; DET.lines = null; DET.pending = false;
+    clearTimeout(DET.timer); detStatus("");
+    syncGo(); renderMode();
+  }
+  function detRun() {
+    var key = $("oc-key").value.trim();
+    var seq = ++DET.seq;
+    DET.pending = true; DET.lines = null; syncGo(); renderMode();
+    detStatus(t("oc_detecting"));
+    api("detect_lines", key).then(function (res) {
+      if (seq !== DET.seq) return;           // stale: the key changed meanwhile
+      DET.pending = false; syncGo();   // user now picks radios and clicks Install themselves
+      if (res.ok) {
+        DET.lines = res.lines || [];
+        var both = DET.lines.length > 1;
+        detStatus(t(both ? "oc_lines_both" : "oc_lines_" + DET.lines[0]), "ok");
+      } else {
+        DET.lines = null;
+        detStatus(errText({ code: res.error_code, message: res.error }), "warn");
+      }
+      renderMode();
+    });
+  }
+  $("oc-key").addEventListener("input", function () {
+    detReset();
+    if ($("oc-key").value.trim().length >= 20) {
+      // debounce + request both count as "checking": Install/Enter stay disabled until the result
+      DET.pending = true; syncGo(); detStatus(t("oc_detecting"));
+      DET.timer = setTimeout(detRun, 600);
+    }
+  });
+  function syncGo() { $("oc-go").disabled = OC.running || DET.pending; }
   function setRunning(on) {
     OC.running = on;
-    $("oc-go").disabled = on; $("oc-key").disabled = on; $("oc-recheck").disabled = on;
+    $("oc-go").disabled = on || DET.pending; $("oc-key").disabled = on; $("oc-recheck").disabled = on;
     $("oc-spin").hidden = !on;
     $("oc-go-text").textContent = t(on ? "oc_running" : "oc_install");
   }
@@ -668,21 +706,24 @@
       setRunning(false);
       var secs = (res.result && res.result.sections) || {};
       var anyOk = Object.keys(secs).some(function (n) { return secs[n].ok; });
-      if (res.result && res.result.ok) { $("oc-key").value = ""; showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; }
-      else { if (anyOk) $("oc-key").value = ""; showForm(true); }
+      if (res.result && res.result.ok) { $("oc-key").value = ""; detReset(); showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; }
+      else { if (anyOk) { $("oc-key").value = ""; detReset(); } showForm(true); }
       if (anyOk) { refreshStatus(); loadModels(); }
     });
   }
   function startOC(keyOverride) {
     if (OC.running) return;
+    // Detection (debounce or request) running: its result decides which questions exist.
+    if (keyOverride === undefined && DET.pending) return;  // still checking the key: no click/Enter
     var key = keyOverride !== undefined ? keyOverride : $("oc-key").value;
     say("");
     setRunning(true);
     OC.view = newView(); OC.view.checking = true; renderOC(OC.view);
+    // A hidden group never sends a choice: only a visible question yields "personal".
     var modeEl = document.querySelector("input[name=oc-mode]:checked");
-    var mode = (STATUS && STATUS.chatgpt_login && modeEl) ? modeEl.value : "lunovant";
+    var mode = (!$("oc-mode-ask").hidden && modeEl) ? modeEl.value : "lunovant";
     var cEl = document.querySelector("input[name=oc-mode-claude]:checked");
-    var cMode = (STATUS && STATUS.claude && STATUS.claude.login && cEl) ? cEl.value : "lunovant";
+    var cMode = (!$("oc-mode-ask-claude").hidden && cEl) ? cEl.value : "lunovant";
     api("one_click_start", key, mode, cMode).then(function (res) {
       if (!res.ok) { setRunning(false); say(res.busy ? t("oc_busy") : t("g_error") + ": " + (res.error || "?"), "error"); return; }
       pollOC();
@@ -733,8 +774,9 @@
   function renderMode() {
     var st = STATUS || {};
     var cl = st.claude || {};
-    $("oc-mode-ask").hidden = !st.chatgpt_login;
-    $("oc-mode-ask-claude").hidden = !cl.login;
+    var ln = DET.lines || [];
+    $("oc-mode-ask").hidden = !(st.chatgpt_login && ln.indexOf("codex") >= 0);
+    $("oc-mode-ask-claude").hidden = !(cl.login && ln.indexOf("claude") >= 0);
     if (OC.view) renderOC(OC.view); else renderModeOut(null);
     $("howto").hidden = !(st.lunovant_installed || cl.installed);
     if (st.lunovant_installed || cl.installed) renderHowto();

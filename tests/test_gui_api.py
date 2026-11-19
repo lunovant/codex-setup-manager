@@ -373,3 +373,55 @@ def test_one_click_holds_shared_lock(gui, monkeypatch):
     gate.set()
     assert done.wait(5)
     _wait_done(gui)
+
+
+# -- detect_lines: which lines a key covers (GET /models only) -----------------------------------
+import httpx as _httpx
+
+
+def _models_client(ids=None, status=200):
+    seen: list[str] = []
+
+    def handler(req: _httpx.Request) -> _httpx.Response:
+        seen.append(req.url.path)
+        if status != 200:
+            return _httpx.Response(status)
+        return _httpx.Response(200, json={"data": [{"id": i} for i in (ids or [])]})
+
+    c = _httpx.Client(transport=_httpx.MockTransport(handler))
+    c.seen = seen  # type: ignore[attr-defined]
+    return c
+
+
+@pytest.mark.parametrize(
+    "ids,lines",
+    [
+        (["gpt-6.1-sol", "gpt-6-luna"], ["codex"]),
+        (["claude-sonnet-4"], ["claude"]),
+        (["gpt-6.1-sol", "claude-sonnet-4", "gemini-x"], ["codex", "claude"]),
+    ],
+)
+def test_detect_lines(gui, ids, lines):
+    c = _models_client(ids)
+    out = gui.detect_lines(KEY, client=c)
+    assert out == {"ok": True, "lines": lines}
+    assert c.seen == ["/v1/models"]  # no usage call, no probes
+    assert KEY not in repr(out)
+    assert not _cfg().exists()
+    assert KEY not in json.dumps(gui._svc.status().last_test or {})
+
+
+def test_detect_lines_errors(gui):
+    assert gui.detect_lines(KEY, client=_models_client([]))["error_code"] == "not_codex_key"
+    assert gui.detect_lines(KEY, client=_models_client(status=401))["error_code"] == "key_invalid"
+    assert gui.detect_lines(KEY, client=_models_client(status=500))["error_code"] == "network"
+    assert gui.detect_lines("  ")["error_code"] == "key_empty"
+    for out in (gui.detect_lines(KEY, client=_models_client([])),):
+        assert out["ok"] is False and KEY not in repr(out)
+
+
+def test_detect_lines_saves_nothing(gui):
+    gui.detect_lines(KEY, client=_models_client(["gpt-6.1-sol"]))
+    st_file = paths.state_path() if hasattr(paths, "state_path") else None
+    assert st_file is None or not st_file.exists()
+    assert gui._svc.get_key("LUNOVANT_API_KEY") is None
