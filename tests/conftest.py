@@ -8,7 +8,10 @@ import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-_HOME_VARS = ("HOME", "USERPROFILE", "CODEX_HOME", "CODEX_SETUP_HOME", "APPDATA", "XDG_CONFIG_HOME")
+_HOME_VARS = (
+    "HOME", "USERPROFILE", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "CODEX_SETUP_HOME", "APPDATA",
+    "XDG_CONFIG_HOME",
+)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -31,6 +34,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, s
         "HOME": str(tmp_path / "home"),
         "USERPROFILE": str(tmp_path / "home"),
         "CODEX_HOME": str(tmp_path / "codex_home"),
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "claude_home"),
         "CODEX_SETUP_HOME": str(tmp_path / "setup_home"),
         "APPDATA": str(tmp_path / "appdata"),
         "XDG_CONFIG_HOME": str(tmp_path / "xdg"),

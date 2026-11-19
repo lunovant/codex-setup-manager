@@ -106,6 +106,73 @@ def _probe_one(http: httpx.Client, base: str, key: str, model: str) -> dict[str,
     return result
 
 
+def _probe_one_claude(http: httpx.Client, origin: str, key: str, model: str) -> dict[str, Any]:
+    """One tiny ``POST {origin}/v1/messages`` (Anthropic wire format, both auth headers)."""
+    started = time.monotonic()
+    result: dict[str, Any] = {
+        "model": model, "ok": False, "latency_ms": None, "status_code": None, "error": None,
+        "tested": True,
+    }
+    try:
+        r = http.post(
+            f"{origin}/v1/messages",
+            headers={
+                "x-api-key": key,
+                "Authorization": f"Bearer {key}",
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            # x-api-key is not stripped by httpx on a cross-origin redirect: never follow one
+            follow_redirects=False,
+            json={"model": model, "max_tokens": 8,
+                  "messages": [{"role": "user", "content": "Reply with OK"}]},
+        )
+    except Exception as exc:
+        problem, detail = classify_transport(exc, key)
+        result["error"] = "timeout" if problem == Problem.TIMEOUT else redact(detail, [key])[:120]
+        return result
+    result["latency_ms"] = int((time.monotonic() - started) * 1000)
+    result["status_code"] = r.status_code
+    if 200 <= r.status_code < 300:
+        result["ok"] = True
+    else:
+        result["error"] = _error_text(r.status_code)
+    return result
+
+
+def probe_claude_models(
+    base_url: str,
+    key: str,
+    models: list[str],
+    concurrency: int = 3,
+    timeout: float = 30.0,
+    *,
+    client: httpx.Client | None = None,
+    on_result: Any = None,
+) -> list[dict[str, Any]]:
+    """Probe exactly ``models`` (the ones we configure) through ``/v1/messages``."""
+    parts = urlsplit((base_url or "").strip())
+    origin = f"{parts.scheme}://{parts.netloc}"
+    own = client is None
+    http = client or httpx.Client(timeout=timeout, follow_redirects=True)
+
+    def run(model: str) -> dict[str, Any]:
+        res = _probe_one_claude(http, origin, key, model)
+        if on_result is not None:
+            try:
+                on_result(res)
+            except Exception:
+                pass
+        return res
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+            return list(pool.map(run, models))
+    finally:
+        if own:
+            http.close()
+
+
 def probe_models(
     base_url: str,
     key: str,

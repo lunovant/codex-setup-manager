@@ -6,13 +6,13 @@
 <!-- pywebview's JS bridge evaluates code it injects, so script-src needs 'unsafe-eval'; only packaged local files are loaded. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; img-src 'self' data:">
 
-<title>Codex Setup Manager</title>
+<title>Lunovant Setup</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="card" id="header" aria-live="polite">
   <div class="hdr-top">
-    <h1>Codex Setup Manager</h1>
+    <h1>Lunovant Setup</h1>
     <div class="hdr-actions">
       <button id="refresh" type="button" data-i18n="g_refresh">Refresh</button>
       <label for="lang"><span data-i18n="g_lang">Language</span></label>
@@ -58,29 +58,18 @@
           <label class="inline"><input type="radio" name="oc-mode" value="lunovant" checked> <span data-i18n="g_mode_ask_lunovant"></span></label>
           <label class="inline"><input type="radio" name="oc-mode" value="personal"> <span data-i18n="g_mode_ask_personal"></span></label>
         </fieldset>
+        <fieldset id="oc-mode-ask-claude" class="mode-ask" hidden>
+          <legend data-i18n="g_mode_ask_claude_title"></legend>
+          <label class="inline"><input type="radio" name="oc-mode-claude" value="lunovant" checked> <span data-i18n="g_mode_ask_claude_lunovant"></span></label>
+          <label class="inline"><input type="radio" name="oc-mode-claude" value="personal"> <span data-i18n="g_mode_ask_claude_personal"></span></label>
+        </fieldset>
       </div>
       <div id="oc-recheck-row" class="row" hidden>
         <button id="oc-recheck" type="button" data-i18n="oc_recheck"></button>
         <button id="oc-change" type="button" class="link" data-i18n="oc_change_key"></button>
       </div>
       <div id="oc-out" aria-live="polite"></div>
-      <div id="oc-after" hidden>
-        <div class="row oc-launch">
-          <button id="oc-app" type="button" class="primary" data-i18n="oc_open_app"></button>
-          <button id="oc-cli" type="button" data-i18n="oc_open_cli"></button>
-          <label for="oc-default" class="oc-defl"><span data-i18n="oc_default_model"></span>:</label>
-          <select id="oc-default"></select>
-          <span id="oc-changed" class="b-ok" hidden></span>
-        </div>
-      </div>
-      <div id="mode-card" class="mode-card" hidden>
-        <h3 data-i18n="g_mode_title"></h3>
-        <div class="seg" role="group">
-          <button id="mode-lunovant" type="button" aria-pressed="false" data-i18n="g_mode_lunovant"></button>
-          <button id="mode-personal" type="button" aria-pressed="false" data-i18n="g_mode_personal"></button>
-        </div>
-        <p id="mode-hint" class="hint" hidden></p>
-      </div>
+      <div id="mode-out"></div>
       <details id="howto" class="howto" hidden>
         <summary data-i18n="g_howto_title"></summary>
         <div id="howto-body"></div>

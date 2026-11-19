@@ -7,6 +7,7 @@ Rules: every method returns ``{"ok": bool, ...}``; exceptions become ``{"ok": Fa
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,7 +18,7 @@ from typing import Any
 from codex_setup import __version__
 from codex_setup.app import MODES, SetupService
 from codex_setup.core.config_store import SaveResult
-from codex_setup.core import codex_config
+from codex_setup.core import claude_config, codex_config
 from codex_setup.core.state import load_state, save_state
 from codex_setup.diagnostics import model_probe
 from codex_setup.core.errors import CodexSetupError, ValidationError
@@ -114,6 +115,7 @@ class GuiApi:
                     or load_state(self._svc._env).one_click is not None
                 )
             return {
+                "claude": self._claude_status(),
                 "chatgpt_login": self._svc.chatgpt_login_present(),
                 "mode": mode,
                 "lunovant_installed": installed,
@@ -151,6 +153,25 @@ class GuiApi:
             }
 
         return self._guard(run)
+
+    def _claude_status(self) -> dict[str, Any]:
+        svc = self._svc
+        installed = svc.claude_installed()
+        mode = svc.claude_current_mode() if installed else None
+        return {
+            "installed": installed,
+            "mode": mode,
+            "login": svc.claude_login_present(),
+            "cli_path": shutil.which("claude"),
+            "terminal": launcher.terminal_supported(svc.platform.system),
+            "command": svc.claude_launch_command(mode),
+            "profile_command": svc.claude_profile_command(),
+            "settings_path": str(svc.claude_settings_path),
+            "profile_path": str(svc.claude_profile_path),
+        }
+
+    def _gt(self, key: str) -> str:
+        return (gui_strings.VI if self._lang == "vi" else gui_strings.EN)[key]
 
     def strings(self, lang: str | None = None) -> dict[str, Any]:
         lang = _lang_ok(lang)
@@ -338,11 +359,35 @@ class GuiApi:
             return {str(k): self._scrub(v) for k, v in obj.items()}
         return obj
 
-    def one_click_start(self, key: str | None = None, mode: str = "lunovant") -> dict[str, Any]:
-        if mode not in MODES:
+    @staticmethod
+    def _section(res: Any) -> dict[str, Any]:
+        """JSON view of one line's result (no key anywhere)."""
+        out: dict[str, Any] = {
+            "ok": bool(res.ok),
+            "line": res.line,
+            "code": res.code,
+            "message": res.message,
+            "key_info": res.key_info,
+            "models": res.models,
+            "default_model": res.default_model,
+            "has_backup": bool(res.backup_path),
+            "mode": res.mode,
+            "legacy_profile": res.legacy_profile,
+        }
+        if res.line == "claude":
+            out["claude_models"] = res.claude_models
+        return out
+
+    def one_click_start(
+        self, key: str | None = None, mode: str = "lunovant", claude_mode: str | None = None
+    ) -> dict[str, Any]:
+        claude_mode = claude_mode or mode
+        if mode not in MODES or claude_mode not in MODES:
             return {"ok": False, "error": f"Unsupported mode: {mode!r}"}
         if not self._svc.chatgpt_login_present():
             mode = "lunovant"  # nothing personal to keep: no question, no choice
+        if not self._svc.claude_login_present():
+            claude_mode = "lunovant"
         key = (key or "").strip()
         if key:
             self._seen.append(key)
@@ -362,22 +407,17 @@ class GuiApi:
         def work() -> None:
             try:
                 with self._lock:  # same lock as every other config/state-changing API call
-                    res = self._svc.one_click_setup(key, None, progress, mode=mode)
-                result: dict[str, Any] = {
-                    "ok": bool(res.ok),
-                    "code": res.code,
-                    "message": res.message,
-                    "key_info": res.key_info,
-                    "models": res.models,
-                    "default_model": res.default_model,
-                    "has_backup": bool(res.backup_path),
-                    "mode": res.mode,
-                    "legacy_profile": res.legacy_profile,
+                    res = self._svc.one_click_setup(
+                        key, None, progress, mode=mode, claude_mode=claude_mode)
+                result: dict[str, Any] = self._section(res)
+                result["sections"] = {
+                    name: self._section(part) for name, part in res.sections.items()
                 }
             except Exception as exc:  # never leak raw tracebacks or secrets
                 msg = redact(f"{exc.__class__.__name__}: {exc}", self._seen)[:300]
                 result = {"ok": False, "code": "error", "message": msg, "key_info": None,
-                          "models": [], "default_model": None, "has_backup": False}
+                          "models": [], "default_model": None, "has_backup": False,
+                          "sections": {}}
             with self._oc_lock:
                 if self._oc["run"] == run:
                     self._oc["result"] = self._scrub(result)
@@ -396,21 +436,20 @@ class GuiApi:
             }
 
     def one_click_last(self) -> dict[str, Any]:
-        """Last saved one-click result, only while its bearer provider is still active."""
+        """Last saved one-click result per line. Codex only while its bearer provider is still
+        active; Claude only while its profile file and settings record are still there."""
 
         def run() -> dict[str, Any]:
+            sections: dict[str, Any] = {}
             state = load_state(self._svc._env)
             saved = state.one_click
-            if not saved:
-                return {"has_last": False}
             active = self._svc._active(ours=True)
-            if not (active.table or {}).get(codex_config.BEARER_FIELD):
-                return {"has_last": False}
-            if _norm_url(saved.get("base_url")) != _norm_url(active.base_url):
-                return {"has_last": False}  # config was changed since: the saved result is stale
-            return self._scrub(
-                {
-                    "has_last": True,
+            if (
+                saved
+                and (active.table or {}).get(codex_config.BEARER_FIELD)
+                and _norm_url(saved.get("base_url")) == _norm_url(active.base_url)
+            ):
+                sections["codex"] = {
                     "when": saved.get("when"),
                     "key_info": saved.get("key_info"),
                     "models": [m for m in saved.get("models") or []
@@ -421,12 +460,36 @@ class GuiApi:
                     "default_model": saved.get("default_model"),
                     "current_model": active.model,
                 }
-            )
+            crec = state.claude or {}
+            coc = crec.get("one_click")
+            prof = claude_config.read_profile_env(self._svc.claude_profile_path)
+            if coc and prof and self._svc.claude_installed() and \
+                    _norm_url(coc.get("base_url")) == _norm_url(prof.get("ANTHROPIC_BASE_URL")):
+                sections["claude"] = {
+                    "when": coc.get("when"),
+                    "key_info": coc.get("key_info"),
+                    "models": list(coc.get("models") or []),
+                    "results": list(coc.get("results") or []),
+                    "default_model": coc.get("default_model"),
+                    "current_model": prof.get("ANTHROPIC_MODEL"),
+                }
+            if not sections:
+                return {"has_last": False}
+            first = sections.get("codex") or sections["claude"]
+            return self._scrub({"has_last": True, **first, "sections": sections})
 
         return self._guard(run)
 
-    def set_mode(self, mode: str, dry_run: bool = False) -> dict[str, Any]:
+    def set_mode(self, mode: str, dry_run: bool = False, line: str = "codex") -> dict[str, Any]:
         def run() -> dict[str, Any]:
+            if line == "claude":
+                if mode == "personal" and not self._svc.claude_login_present():
+                    raise ValidationError(self._gt("g_claude_mode_no_login"))
+                out = self._diff(self._svc.claude_set_mode(mode, bool(dry_run)))
+                out["mode"] = mode if not dry_run else self._svc.claude_current_mode()
+                return out
+            if line != "codex":
+                raise ValidationError(f"Unknown line: {line!r}")
             if mode == "personal" and not self._svc.chatgpt_login_present():
                 raise ValidationError(i18n.t("g_mode_no_login"))
             out = self._diff(self._svc.set_mode(mode, bool(dry_run)))
@@ -438,8 +501,41 @@ class GuiApi:
     def set_default_model(self, model: str) -> dict[str, Any]:
         return self._guard(lambda: self._diff(self._svc.set_default_model(model)))
 
-    def reprobe_model(self, model: str) -> dict[str, Any]:
+    def _reprobe_claude(self, model_: str) -> dict[str, Any]:
+        svc = self._svc
+        with self._oc_lock:
+            if self._oc["running"]:
+                raise CodexSetupError("A setup is already running.")
+            ctx = self._oc.get("ctx")
+        prof = claude_config.read_profile_env(svc.claude_profile_path)
+        if not prof:
+            raise CodexSetupError("Lunovant for Claude Code is not set up yet. Run the setup first.")
+        key = str((ctx or {}).get("key") or prof["ANTHROPIC_AUTH_TOKEN"])
+        url = prof["ANTHROPIC_BASE_URL"]
+        self._seen.append(key)
+        res = model_probe.probe_claude_models(url, key, [model_])[0]
+        if key == prof["ANTHROPIC_AUTH_TOKEN"]:
+            state = load_state(svc._env)  # fresh: never write back a stale snapshot
+            oc = (state.claude or {}).get("one_click")
+            if oc is not None:
+                rows = [r for r in oc.get("results", []) if isinstance(r, dict)]
+                old = next((r for r in rows if r.get("model") == model_), None)
+                if old is not None and old.get("role"):
+                    res["role"] = old["role"]
+                rows = [res if r.get("model") == model_ else r for r in rows]
+                if old is None:
+                    rows.append(res)
+                oc["results"] = rows
+                save_state(state, svc._env)
+        return {"result": self._scrub(res)}
+
+    def reprobe_model(self, model: str, line: str = "codex") -> dict[str, Any]:
         def run() -> dict[str, Any]:
+            if line == "claude":
+                m = (model or "").strip()
+                if not m:
+                    raise ValidationError("Model name is empty.")
+                return self._reprobe_claude(m)
             model_ = (model or "").strip()
             if not model_:
                 raise ValidationError("Model name is empty.")
@@ -496,6 +592,17 @@ class GuiApi:
     # -- launch / env ------------------------------------------------------
     def launch(self, target: str = "cli") -> dict[str, Any]:
         def run() -> dict[str, Any]:
+            if target == "claude":
+                svc0 = self._svc
+                # macOS: the GUI's PATH often lacks ~/.local/bin or npm/nvm dirs; Terminal's
+                # login shell resolves `claude` itself, so do not block on our own lookup.
+                if svc0.platform.system != "macos" and not shutil.which("claude"):
+                    raise CodexSetupError(self._gt("g_claude_not_found"))
+                argv = ["claude"]
+                if svc0.claude_current_mode() != "lunovant":
+                    argv += ["--settings", str(svc0.claude_profile_path)]
+                launcher.open_terminal(svc0.platform.system, argv)
+                return {"started": True}
             if target == "app":
                 self._svc.launch("app")
                 return {"started": True}

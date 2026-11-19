@@ -377,6 +377,7 @@
   });
 
   // -- one-click setup ---------------------------------------------------------------------
+  var LINES = ["codex", "claude"];
   function fmtDate(iso) {
     if (!iso) return "?";
     var d = new Date(iso);
@@ -384,19 +385,40 @@
     var p = function (n) { return (n < 10 ? "0" : "") + n; };
     return p(d.getDate()) + "/" + p(d.getMonth() + 1) + "/" + d.getFullYear();
   }
-  function newView() {
-    return { keyInfo: null, models: null, probes: {}, wrote: false, done: false, result: null,
-             checking: false, fetching: false, defaultModel: null, currentModel: null, hasBackup: false, last: false };
+  function newSec() {
+    return { models: null, probes: {}, wrote: false, result: null, defaultModel: null, currentModel: null, hasBackup: false };
   }
+  function newView() {
+    return { keyInfo: null, checking: false, fetching: false, lines: null, done: false, result: null, last: false,
+             secs: { codex: newSec(), claude: newSec() } };
+  }
+  function isClaudeModel(m) { return String(m).toLowerCase().indexOf("claude-") === 0; }
   function foldStep(v, st) {
     var step = st.step, d = st.detail || {};
     if (step === "check_key") { if (d.valid !== undefined) v.keyInfo = d; else v.checking = true; }
     else if (step === "fetch_models") {
-      if (d.models) { v.models = d.models; v.fetching = false;
-        d.models.forEach(function (m) { if (!v.probes[m]) v.probes[m] = { pending: true }; }); }
-      else v.fetching = true;
-    } else if (step.indexOf("probe:") === 0) v.probes[d.model || step.slice(6)] = d;
-    else if (step === "write_config") v.wrote = true;
+      if (d.models) {
+        v.fetching = false;
+        if (d.lines) v.lines = d.lines;
+        var cx = v.secs.codex;
+        cx.models = d.models.filter(function (m) { return !isClaudeModel(m); });
+        cx.models.forEach(function (m) { if (!cx.probes[m]) cx.probes[m] = { pending: true }; });
+      } else v.fetching = true;
+    } else if (step === "claude_models") {
+      var cl = v.secs.claude;
+      cl.models = d.models || [];
+      cl.models.forEach(function (m) {
+        cl.probes[m] = (d.targets || []).indexOf(m) >= 0 ? { pending: true } : { untested: true };
+      });
+    } else if (step.indexOf("claude_probe:") === 0) v.secs.claude.probes[d.model || step.slice(13)] = d;
+    else if (step.indexOf("probe:") === 0) v.secs.codex.probes[d.model || step.slice(6)] = d;
+    else if (step === "write_config") v.secs.codex.wrote = true;
+    else if (step === "claude_write") v.secs.claude.wrote = true;
+  }
+  function secFromResult(sec, r) {
+    sec.result = r; sec.defaultModel = r.default_model; sec.hasBackup = r.has_backup;
+    (r.models || []).forEach(function (row) { sec.probes[row.model] = row.tested === false ? { untested: true } : row; });
+    if (r.models && r.models.length) sec.models = r.models.map(function (row) { return row.model; });
   }
   function viewFromPoll(res) {
     var v = newView();
@@ -404,18 +426,25 @@
     if (res.result) {
       v.done = true; v.result = res.result;
       if (res.result.key_info) v.keyInfo = res.result.key_info;
-      v.defaultModel = res.result.default_model; v.hasBackup = res.result.has_backup;
-      (res.result.models || []).forEach(function (r) { v.probes[r.model] = r; });
+      var secs = res.result.sections || {};
+      LINES.forEach(function (n) { if (secs[n]) secFromResult(v.secs[n], secs[n]); });
+      if (!Object.keys(secs).length) v.lines = [];
     }
     return v;
   }
   function viewFromLast(last) {
     var v = newView();
     v.last = true; v.done = true; v.result = { ok: true, code: "ok" }; v.keyInfo = last.key_info;
-    v.models = last.models || [];
-    (last.results || []).forEach(function (r) { v.probes[r.model] = r; });
-    v.models.forEach(function (m) { if (!v.probes[m]) v.probes[m] = { pending: false, ok: false, error: "?" }; });
-    v.defaultModel = last.default_model; v.currentModel = last.current_model; v.wrote = true; v.hasBackup = true;
+    v.lines = [];
+    LINES.forEach(function (n) {
+      var d = (last.sections || {})[n]; if (!d) return;
+      var sec = v.secs[n]; v.lines.push(n);
+      sec.models = d.models || [];
+      sec.result = { ok: true, code: "ok" };
+      (d.results || []).forEach(function (r) { sec.probes[r.model] = r.tested === false ? { untested: true } : r; });
+      sec.models.forEach(function (m) { if (!sec.probes[m]) sec.probes[m] = { pending: false, ok: false, error: "?" }; });
+      sec.defaultModel = d.default_model; sec.currentModel = d.current_model; sec.wrote = true; sec.hasBackup = true;
+    });
     return v;
   }
   function line(kind, text) {
@@ -445,8 +474,15 @@
     parts.push(info.expires_at ? t("oc_expires", { date: fmtDate(info.expires_at) }) : t("g_no_expiry"));
     return "✓ " + parts.join(" · ");
   }
-  function modelRow(v, m) {
-    var p = v.probes[m] || { pending: true };
+  function modelRow(v, name, m) {
+    var p = v.secs[name].probes[m] || { pending: true };
+    if (p.untested) {
+      var u = el("div", "oc-model");
+      u.appendChild(el("span", "st", "•"));
+      u.appendChild(el("span", "name", m));
+      u.appendChild(el("span", "lat", t("oc_untested")));
+      return u;
+    }
     var row = el("div", "oc-model " + (p.pending || p.running ? "" : (p.ok ? "ok" : "warn")));
     var st = el("span", "st");
     if (p.pending || p.running) { st.appendChild(el("span", "spinner")); }
@@ -460,13 +496,127 @@
       row.appendChild(el("span", "lat", p.error || "?"));
       if (!v.done) return row;  // no per-model retry while the run is still in progress
       var b = el("button", null, t("oc_retry")); b.type = "button";
-      b.addEventListener("click", function () { reprobe(m); });
+      b.addEventListener("click", function () { reprobe(name, m); });
       row.appendChild(b);
     }
     return row;
   }
-  function passing(v) {
-    return (v.models || []).filter(function (m) { return v.probes[m] && v.probes[m].ok; });
+  function passing(v, name) {
+    var sec = v.secs[name];
+    return (sec.models || []).filter(function (m) { return sec.probes[m] && sec.probes[m].ok; });
+  }
+  function lineInfo(name) {
+    var s = STATUS || {};
+    if (name === "claude") {
+      var c = s.claude || {};
+      return { installed: !!c.installed, mode: c.mode, login: !!c.login };
+    }
+    return { installed: !!s.lunovant_installed, mode: s.mode, login: !!s.chatgpt_login };
+  }
+  function modeCard(name) {
+    var info = lineInfo(name);
+    if (!info.installed) return null;
+    var card = el("div", "mode-card");
+    card.appendChild(el("h4", null, t("g_mode_title")));
+    var seg = el("div", "seg"); seg.setAttribute("role", "group");
+    var a = el("button", null, t("g_mode_lunovant")); a.type = "button";
+    var b = el("button", null, t(name === "claude" ? "g_mode_claude_personal" : "g_mode_personal")); b.type = "button";
+    a.setAttribute("aria-pressed", info.mode === "lunovant" ? "true" : "false");
+    b.setAttribute("aria-pressed", info.mode === "personal" ? "true" : "false");
+    b.disabled = !info.login;
+    a.addEventListener("click", function () { switchMode(name, "lunovant"); });
+    b.addEventListener("click", function () { switchMode(name, "personal"); });
+    seg.appendChild(a); seg.appendChild(b); card.appendChild(seg);
+    if (!info.login) card.appendChild(el("p", "hint", t(name === "claude" ? "g_claude_mode_no_login" : "g_mode_no_login")));
+    return card;
+  }
+  function launchRow(v, name) {
+    var sec = v.secs[name];
+    var r = el("div", "row oc-launch");
+    if (name === "claude") {
+      var c = (STATUS && STATUS.claude) || {};
+      if (c.terminal) {
+        var tb = el("button", "primary", t("oc_open_claude_terminal")); tb.type = "button";
+        tb.addEventListener("click", function () {
+          api("launch", "claude").then(function (res) { res.ok ? say(t("g_launched"), "ok") : fail(res); });
+        });
+        r.appendChild(tb);
+      } else {
+        r.appendChild(el("span", null, t("oc_claude_run")));
+        r.appendChild(cmdRow(c.command || "claude"));
+      }
+      return r;
+    }
+    var app = el("button", "primary", t("oc_open_app")); app.type = "button";
+    app.addEventListener("click", function () {
+      api("launch", "app").then(function (res) { res.ok ? say(t("ln_app_started"), "ok") : fail(res); });
+    });
+    var cli = el("button", null, t("oc_open_cli")); cli.type = "button";
+    cli.addEventListener("click", function () {
+      api("launch", "cli").then(function (res) { res.ok ? say(t("g_launched"), "ok") : fail(res); });
+    });
+    r.appendChild(app); r.appendChild(cli);
+    var want = sec.currentModel || sec.defaultModel;
+    var pass = passing(v, name);
+    var wantOk = pass.indexOf(want) >= 0;
+    var lab = el("label", "oc-defl", t("oc_default_model") + ":"); lab.htmlFor = "oc-default";
+    var sel = el("select"); sel.id = "oc-default";
+    // Never show a replacement as if it were saved: the select mirrors the real config.
+    if (!wantOk) {
+      var ph = document.createElement("option");
+      ph.value = ""; ph.disabled = true; ph.textContent = t("oc_pick_model"); sel.appendChild(ph);
+    }
+    pass.forEach(function (m) { var o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o); });
+    sel.value = wantOk ? want : "";
+    var changed = el("span", "b-ok"); changed.hidden = true;
+    sel.addEventListener("change", function () {
+      changed.hidden = true;
+      api("set_default_model", sel.value).then(function (res) {
+        if (!res.ok) { fail(res); return; }
+        changed.textContent = "✓ " + t("oc_changed"); changed.hidden = false;
+        sec.currentModel = sel.value;
+        refreshStatus();
+      });
+    });
+    r.appendChild(lab); r.appendChild(sel); r.appendChild(changed);
+    return r;
+  }
+  function renderSec(v, name) {
+    var sec = v.secs[name];
+    var box = el("div", "oc-sec");
+    box.appendChild(el("h3", null, t(name === "claude" ? "g_line_claude" : "g_line_codex")));
+    if (sec.models && sec.models.length) {
+      box.appendChild(line("ok", "✓ " + t("oc_models_found", { n: sec.models.length })));
+      if (name === "claude" && !v.done) box.appendChild(el("p", "hint", t("oc_claude_tested")));
+      var list = el("div", "oc-models");
+      sec.models.forEach(function (m) { list.appendChild(modelRow(v, name, m)); });
+      box.appendChild(list);
+    }
+    var failed = v.done && sec.result && !sec.result.ok;
+    if (failed) {
+      box.appendChild(line("fail", "⚠ " + errText(sec.result)));
+      var rr = el("div", "row");
+      var retry = el("button", "primary", t("oc_retry")); retry.type = "button";
+      retry.addEventListener("click", retryOC);
+      rr.appendChild(retry); box.appendChild(rr);
+    }
+    var ok = v.done && sec.result && sec.result.ok;
+    if (sec.wrote && ok) {
+      var cl = name === "claude";
+      box.appendChild(line("ok", "✓ " + t(cl ? (sec.hasBackup ? "oc_wrote_claude" : "oc_wrote_claude_nobackup")
+                                              : (sec.hasBackup ? "oc_wrote" : "oc_wrote_nobackup"))));
+      var want = sec.currentModel || sec.defaultModel;
+      if (cl || passing(v, name).indexOf(want) >= 0) box.appendChild(line("ok", "✓ " + t(cl ? "oc_ready_claude" : "oc_ready")));
+      else box.appendChild(line("warn", "⚠ " + t("oc_default_broken", { model: want || "?" })));
+    }
+    if (ok) {
+      box.appendChild(launchRow(v, name));
+      var mc = modeCard(name); if (mc) box.appendChild(mc);
+    }
+    return box;
+  }
+  function retryOC() {
+    if ($("oc-key").value) startOC(); else { showForm(true); $("oc-key").focus(); }
   }
   function renderOC(v) {
     OC.view = v;
@@ -474,48 +624,31 @@
     var failed = v.done && v.result && !v.result.ok;
     if (v.checking && !v.keyInfo && !failed) out.appendChild(line("", t("oc_checking")));
     if (v.keyInfo && v.keyInfo.valid && !v.keyInfo.expired) out.appendChild(line("ok", keyLine(v.keyInfo)));
-    if (v.fetching && !v.models) out.appendChild(line("", t("oc_fetching")));
-    if (v.models && v.models.length) {
-      out.appendChild(line("ok", "✓ " + t("oc_models_found", { n: v.models.length })));
-      var box = el("div", "oc-models");
-      v.models.forEach(function (m) { box.appendChild(modelRow(v, m)); });
-      out.appendChild(box);
-    }
-    if (failed) {
-      var l = line("fail", "⚠ " + errText(v.result));
-      out.appendChild(l);
+    if (v.fetching && !v.lines && !(v.secs.codex.models && v.secs.codex.models.length)) out.appendChild(line("", t("oc_fetching")));
+    var shown = {};
+    (v.lines || (v.secs.codex.models && v.secs.codex.models.length ? ["codex"] : [])).forEach(function (n) {
+      if (v.done && !v.secs[n].result && !v.secs[n].models) return;
+      shown[n] = true; out.appendChild(renderSec(v, n));
+    });
+    if (failed && !Object.keys(shown).length || (failed && !v.result.sections)) {
+      out.appendChild(line("fail", "⚠ " + errText(v.result)));
       var r = el("div", "row");
       var retry = el("button", "primary", t("oc_retry")); retry.type = "button";
-      retry.addEventListener("click", function () { if ($("oc-key").value) startOC(); else { showForm(true); $("oc-key").focus(); } });
-      r.appendChild(retry);
-      if (v.result.code === "not_codex_key") {
-        var lk = el("button", null, t("oc_open_claude")); lk.type = "button";
-        lk.addEventListener("click", function () { api("open_url", t("oc_claude_url")); });
-        r.appendChild(lk);
-      }
-      out.appendChild(r);
+      retry.addEventListener("click", retryOC);
+      r.appendChild(retry); out.appendChild(r);
     }
-    var ok = v.done && v.result && v.result.ok;
-    var want = v.currentModel || v.defaultModel;
-    var pass = passing(v);
-    var wantOk = pass.indexOf(want) >= 0;
-    if (v.wrote && ok) {
-      out.appendChild(line("ok", "\u2713 " + t(v.hasBackup ? "oc_wrote" : "oc_wrote_nobackup")));
-      if (wantOk) out.appendChild(line("ok", "\u2713 " + t("oc_ready")));
-      else out.appendChild(line("warn", "\u26A0 " + t("oc_default_broken", { model: want || "?" })));
-    }
-    $("oc-after").hidden = !ok;
-    if (ok) {
-      // Never show a replacement as if it were saved: the select mirrors the real config.
-      var sel = $("oc-default");
-      sel.textContent = "";
-      if (!wantOk) {
-        var ph = document.createElement("option");
-        ph.value = ""; ph.disabled = true; ph.textContent = t("oc_pick_model"); sel.appendChild(ph);
-      }
-      pass.forEach(function (m) { var o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o); });
-      sel.value = wantOk ? want : "";
-    }
+    renderModeOut(shown);
+  }
+  function renderModeOut(shown) {
+    var box = $("mode-out"); box.textContent = "";
+    LINES.forEach(function (n) {
+      if (shown && shown[n]) return;
+      var mc = modeCard(n);
+      if (!mc) return;
+      var wrap = el("div", "oc-sec");
+      wrap.appendChild(el("h3", null, t(n === "claude" ? "g_line_claude" : "g_line_codex")));
+      wrap.appendChild(mc); box.appendChild(wrap);
+    });
   }
   function showForm(show) {
     $("oc-form").hidden = !show;
@@ -533,8 +666,11 @@
       renderOC(viewFromPoll(res));
       if (res.running) { OC.timer = setTimeout(pollOC, 300); return; }
       setRunning(false);
-      if (res.result && res.result.ok) { $("oc-key").value = ""; showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; refreshStatus(); loadModels(); }
-      else showForm(true);
+      var secs = (res.result && res.result.sections) || {};
+      var anyOk = Object.keys(secs).some(function (n) { return secs[n].ok; });
+      if (res.result && res.result.ok) { $("oc-key").value = ""; showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; }
+      else { if (anyOk) $("oc-key").value = ""; showForm(true); }
+      if (anyOk) { refreshStatus(); loadModels(); }
     });
   }
   function startOC(keyOverride) {
@@ -545,16 +681,18 @@
     OC.view = newView(); OC.view.checking = true; renderOC(OC.view);
     var modeEl = document.querySelector("input[name=oc-mode]:checked");
     var mode = (STATUS && STATUS.chatgpt_login && modeEl) ? modeEl.value : "lunovant";
-    api("one_click_start", key, mode).then(function (res) {
+    var cEl = document.querySelector("input[name=oc-mode-claude]:checked");
+    var cMode = (STATUS && STATUS.claude && STATUS.claude.login && cEl) ? cEl.value : "lunovant";
+    api("one_click_start", key, mode, cMode).then(function (res) {
       if (!res.ok) { setRunning(false); say(res.busy ? t("oc_busy") : t("g_error") + ": " + (res.error || "?"), "error"); return; }
       pollOC();
     });
   }
-  function reprobe(m) {
-    var v = OC.view; if (!v) return;
-    v.probes[m] = { running: true }; renderOC(v);
-    api("reprobe_model", m).then(function (res) {
-      v.probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" };
+  function reprobe(name, m) {
+    var v = OC.view; if (!v) return Promise.resolve();
+    v.secs[name].probes[m] = { running: true }; renderOC(v);
+    return api("reprobe_model", m, name).then(function (res) {
+      v.secs[name].probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" };
       renderOC(v);
     });
   }
@@ -567,28 +705,18 @@
   });
   $("oc-adv").addEventListener("click", function () { setAdvanced(true); $("nav-adv").focus(); });
   $("oc-change").addEventListener("click", function () { showForm(true); $("oc-key").focus(); });
-  // "Check again" re-probes every listed model with the stored key (the key is never shown).
+  // "Check again" re-probes every tested model with the stored key (the key is never shown).
   $("oc-recheck").addEventListener("click", function () {
-    var v = OC.view; if (!v || !v.models) return;
+    var v = OC.view; if (!v) return;
     $("oc-recheck").disabled = true;
     var chain = Promise.resolve();
-    v.models.forEach(function (m) { chain = chain.then(function () { return new Promise(function (r) { v.probes[m] = { running: true }; renderOC(v); api("reprobe_model", m).then(function (res) { v.probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" }; renderOC(v); r(); }); }); }); });
-    chain.then(function () { $("oc-recheck").disabled = false; });
-  });
-  $("oc-default").addEventListener("change", function () {
-    var ch = $("oc-changed"); ch.hidden = true;
-    api("set_default_model", $("oc-default").value).then(function (res) {
-      if (!res.ok) { fail(res); return; }
-      ch.textContent = "✓ " + t("oc_changed"); ch.hidden = false;
-      if (OC.view) OC.view.currentModel = $("oc-default").value;
-      refreshStatus();
+    LINES.forEach(function (n) {
+      (v.secs[n].models || []).forEach(function (m) {
+        if (v.secs[n].probes[m] && v.secs[n].probes[m].untested) return;
+        chain = chain.then(function () { return reprobe(n, m); });
+      });
     });
-  });
-  $("oc-app").addEventListener("click", function () {
-    api("launch", "app").then(function (res) { res.ok ? say(t("ln_app_started"), "ok") : fail(res); });
-  });
-  $("oc-cli").addEventListener("click", function () {
-    api("launch", "cli").then(function (res) { res.ok ? say(t("g_launched"), "ok") : fail(res); });
+    chain.then(function () { $("oc-recheck").disabled = false; });
   });
   function loadLast() {
     return api("one_click_last").then(function (res) {
@@ -601,32 +729,25 @@
     });
   }
 
-  // -- mode card + how-to -------------------------------------------------------------------
+  // -- mode switch + how-to -------------------------------------------------------------------
   function renderMode() {
     var st = STATUS || {};
-    var show = !!st.lunovant_installed;
-    $("mode-card").hidden = !show;
-    $("howto").hidden = !show;
+    var cl = st.claude || {};
     $("oc-mode-ask").hidden = !st.chatgpt_login;
-    if (!show) return;
-    $("mode-lunovant").setAttribute("aria-pressed", st.mode === "lunovant" ? "true" : "false");
-    $("mode-personal").setAttribute("aria-pressed", st.mode === "personal" ? "true" : "false");
-    $("mode-personal").disabled = !st.chatgpt_login;
-    var h = $("mode-hint");
-    h.textContent = st.chatgpt_login ? "" : t("g_mode_no_login");
-    h.hidden = !!st.chatgpt_login;
-    renderHowto();
+    $("oc-mode-ask-claude").hidden = !cl.login;
+    if (OC.view) renderOC(OC.view); else renderModeOut(null);
+    $("howto").hidden = !(st.lunovant_installed || cl.installed);
+    if (st.lunovant_installed || cl.installed) renderHowto();
   }
-  function switchMode(mode) {
-    if (!STATUS || STATUS.mode === mode) return;
-    api("set_mode", mode, false).then(function (res) {
+  function switchMode(name, mode) {
+    var info = lineInfo(name);
+    if (!STATUS || info.mode === mode) return;
+    api("set_mode", mode, false, name).then(function (res) {
       if (!res.ok) { fail(res); return; }
-      say(t("g_mode_switched"), "ok");
+      say(t(name === "claude" ? "g_claude_mode_switched" : "g_mode_switched"), "ok");
       refreshStatus();
     });
   }
-  $("mode-lunovant").addEventListener("click", function () { switchMode("lunovant"); });
-  $("mode-personal").addEventListener("click", function () { switchMode("personal"); });
 
   function cmdRow(text) {
     var r = el("div", "cmd");
@@ -642,21 +763,38 @@
   }
   function renderHowto() {
     var box = $("howto-body"); box.textContent = "";
-    box.appendChild(el("h4", null, t("g_howto_desktop_t")));
-    box.appendChild(el("p", null, t("g_howto_desktop")));
-    box.appendChild(el("h4", null, t("g_howto_ide_t")));
-    box.appendChild(el("p", null, t("g_howto_ide")));
-    box.appendChild(el("h4", null, t("g_howto_cli_t")));
-    box.appendChild(el("p", null, t("g_howto_cli_default")));
-    box.appendChild(cmdRow("codex"));
-    box.appendChild(el("p", null, t("g_howto_cli_profile")));
-    box.appendChild(cmdRow("codex -p lunovant"));
-    box.appendChild(el("p", null, t("g_howto_cli_model")));
-    box.appendChild(cmdRow("/model"));
+    var st = STATUS || {};
+    if (st.lunovant_installed) {
+      box.appendChild(el("h4", null, t("g_howto_desktop_t")));
+      box.appendChild(el("p", null, t("g_howto_desktop")));
+      box.appendChild(el("h4", null, t("g_howto_ide_t")));
+      box.appendChild(el("p", null, t("g_howto_ide")));
+      box.appendChild(el("h4", null, t("g_howto_cli_t")));
+      box.appendChild(el("p", null, t("g_howto_cli_default")));
+      box.appendChild(cmdRow("codex"));
+      box.appendChild(el("p", null, t("g_howto_cli_profile")));
+      box.appendChild(cmdRow("codex -p lunovant"));
+      box.appendChild(el("p", null, t("g_howto_cli_model")));
+      box.appendChild(cmdRow("/model"));
+    }
+    if (st.claude && st.claude.installed) {
+      box.appendChild(el("h4", null, t("g_howto_claude_t")));
+      box.appendChild(el("p", null, t("g_howto_claude_cli")));
+      box.appendChild(cmdRow("claude"));
+      box.appendChild(el("p", null, t("g_howto_claude_profile")));
+      box.appendChild(cmdRow(st.claude.profile_command || "claude --settings ~/.claude/lunovant-settings.json"));
+      box.appendChild(el("p", null, t("g_howto_claude_model")));
+      box.appendChild(cmdRow("/model sonnet"));
+      box.appendChild(el("h4", null, t("g_howto_claude_ide_t")));
+      box.appendChild(el("p", null, t("g_howto_claude_ide")));
+      box.appendChild(el("p", null, "• " + t("g_howto_claude_desktop")));
+    }
     box.appendChild(el("h4", null, t("g_howto_notes_t")));
-    box.appendChild(el("p", null, "\u2022 " + t("g_howto_note_title")));
-    box.appendChild(el("p", null, "\u2022 " + t("g_howto_note_cloud")));
-    box.appendChild(el("p", null, "\u2022 " + t("g_howto_note_balance")));
+    if (st.lunovant_installed) {
+      box.appendChild(el("p", null, "• " + t("g_howto_note_title")));
+      box.appendChild(el("p", null, "• " + t("g_howto_note_cloud")));
+    }
+    box.appendChild(el("p", null, "• " + t("g_howto_note_balance")));
     box.appendChild(cmdRow(t("g_dashboard_url")));
   }
 

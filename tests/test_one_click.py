@@ -151,7 +151,7 @@ def test_replaces_env_key_and_fallback_default(svc):
 @pytest.mark.parametrize("kw,code", [
     ({"usage_status": 401}, "key_invalid"),
     ({"usage": {"isValid": False, "status": "expired", "expires_at": "2020-01-01"}}, "key_expired"),
-    ({"models": ["claude-sonnet", "claude-opus"]}, "not_codex_key"),
+    ({"models": ["whisper-1", "text-embedding-3"]}, "not_codex_key"),
     ({"models": []}, "not_codex_key"),
     ({"fail": {"gpt-6.1-sol", "gpt-6-luna"}}, "no_model_works"),
 ])
