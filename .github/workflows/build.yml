@@ -9,6 +9,8 @@ on:
 
 env:
   PYTHONUTF8: "1"
+  # Codex CLI used by the e2e smoke test (0.170.0 verified end-to-end on Linux 2026-11-19).
+  CODEX_CLI_VERSION: "0.170.0"
 
 jobs:
   build:
@@ -88,6 +90,16 @@ jobs:
 
       - name: Build and smoke test
         run: python scripts/build.py --smoke
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install Codex CLI
+        run: npm install -g "@openai/codex@${{ env.CODEX_CLI_VERSION }}"
+
+      - name: End-to-end smoke (binary + real Codex CLI)
+        run: python scripts/e2e_smoke.py "dist/${{ matrix.artifact }}" --with-codex
 
       - name: Notarize
         if: runner.os == 'macOS' && env.MACOS_SIGNING == 'true'
