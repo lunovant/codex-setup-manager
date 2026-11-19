@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shlex
 import stat
 import time
 
@@ -199,7 +200,7 @@ def test_profile_file_only_env(svc):
     data = json.loads(_profile().read_text())
     assert list(data) == ["env"]
     assert data["env"] == _env_of(_settings())
-    assert svc.claude_launch_command("personal") == f"claude --settings {_profile()}"
+    assert svc.claude_launch_command("personal") == f"claude --settings {shlex.quote(str(_profile()))}"
     assert svc.claude_launch_command("lunovant") == "claude"
 
 
@@ -609,8 +610,10 @@ def test_command_uses_real_profile_path_with_spaces(svc, monkeypatch, tmp_path):
     d = tmp_path / "my claude"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(d))
     res = svc.one_click_setup(KEY, client=make_client(CLAUDE), mode="personal")
-    assert f"claude --settings '{d}/lunovant-settings.json'" in res.message
-    assert svc.claude_launch_command("personal") == f"claude --settings '{d}/lunovant-settings.json'"
+    # svc pretends to be macOS, so the path is POSIX-quoted even on a Windows runner.
+    expected = f"claude --settings {shlex.quote(str(d / 'lunovant-settings.json'))}"
+    assert expected in res.message
+    assert svc.claude_launch_command("personal") == expected
     assert GuiApi(svc, lang="en").status()["claude"]["profile_command"] == svc.claude_launch_command("personal")
     monkeypatch.delenv("CLAUDE_CONFIG_DIR")
     assert svc.claude_launch_command("personal") == "claude --settings ~/.claude/lunovant-settings.json"
