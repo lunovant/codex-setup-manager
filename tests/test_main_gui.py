@@ -35,7 +35,7 @@ def test_no_args_falls_back_to_tui_path(calls, monkeypatch, capsys):
     monkeypatch.setattr(cli, "gui_available", lambda: (False, "nope"))
     assert cli.main(["--lang", "en"]) == 0
     assert calls["gui"] == []
-    assert "codex-setup --help" in capsys.readouterr().out  # non-TTY hint
+    assert "lunovant-setup --help" in capsys.readouterr().out  # non-TTY hint
 
 
 def test_tui_flag_skips_gui(calls, monkeypatch):

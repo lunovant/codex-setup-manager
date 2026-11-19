@@ -9,7 +9,7 @@
 # Notarization does not modify the file, so its sha256 stays valid.
 #
 # For a .app bundle the app is zipped for submission; on Accepted the ticket is
-# stapled to the app and the release zip (dist/codex-setup-macos-<arch>-app.zip,
+# stapled to the app and the release zip (dist/lunovant-setup-macos-<arch>-app.zip,
 # next to the app) plus its .sha256 are re-created from the stapled app.
 set -euo pipefail
 
@@ -73,7 +73,7 @@ if [[ "$is_app" -eq 1 ]]; then
     x86_64) arch=x64 ;;
     *) arch="$(uname -m)" ;;
   esac
-  release_zip="$(dirname "$binary")/codex-setup-macos-${arch}-app.zip"
+  release_zip="$(dirname "$binary")/lunovant-setup-macos-${arch}-app.zip"
   rm -f "$release_zip"
   ditto -c -k --keepParent "$binary" "$release_zip"
   (cd "$(dirname "$release_zip")" && shasum -a 256 "$(basename "$release_zip")" > "$(basename "$release_zip").sha256")

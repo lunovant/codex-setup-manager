@@ -49,7 +49,7 @@ def _common() -> argparse.ArgumentParser:
 def build_parser() -> argparse.ArgumentParser:
     common = _common()
     parser = argparse.ArgumentParser(
-        prog="codex-setup",
+        prog="lunovant-setup",
         description="Lunovant Setup: set up Codex and Claude Code for Lunovant with one key.",
         parents=[common],
     )

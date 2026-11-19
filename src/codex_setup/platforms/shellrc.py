@@ -12,6 +12,7 @@ from pathlib import Path
 from codex_setup.core.config_store import atomic_write_text
 from codex_setup.core.errors import ValidationError
 
+# legacy name kept on purpose: renaming loses existing user state
 START = "# >>> codex-setup-manager >>>"
 END = "# <<< codex-setup-manager <<<"
 PLAINTEXT_WARNING = "WARNING: this stores the API key in plaintext in your shell startup file."
@@ -53,6 +54,7 @@ def _backup(rc_path: Path) -> Path | None:
     if not rc_path.exists():
         return None
     stamp = time.strftime("%Y%m%d-%H%M%S")
+    # legacy name kept on purpose: renaming loses existing user state
     dest = rc_path.with_name(f"{rc_path.name}.codex-setup-backup-{stamp}")
     n = 0
     while dest.exists():

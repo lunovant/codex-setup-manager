@@ -2,21 +2,21 @@
 
 [English](README.md) | Tiếng Việt
 
-Lunovant Setup (`codex-setup`) là công cụ cài đặt tất cả-trong-một giúp bạn kết nối **OpenAI Codex** và **Claude Code** với hệ thống API của Lunovant một cách dễ dàng và an toàn. Công cụ tự động lưu trữ cấu hình, bảo mật khóa API, kiểm tra kết nối model và cho phép bạn dùng song song với các tài khoản cá nhân có sẵn.
+Lunovant Setup (`lunovant-setup`) là công cụ cài đặt tất cả-trong-một giúp bạn kết nối **OpenAI Codex** và **Claude Code** với hệ thống API của Lunovant một cách dễ dàng và an toàn. Công cụ tự động lưu trữ cấu hình, bảo mật khóa API, kiểm tra kết nối model và cho phép bạn dùng song song với các tài khoản cá nhân có sẵn.
 
 Ứng dụng tự động nhận diện loại key bạn nhập vào:
 - **Key Orion**: Cài đặt cho OpenAI Codex (cả bản dòng lệnh CLI và app Desktop).
 - **Key Lyra**: Cài đặt cho Claude Code (cả trong terminal và extension trên VS Code / Cursor).
 - **Key kết hợp (có cả hai dòng)**: Tự động cài đặt đồng thời cả Codex và Claude Code chỉ với 1 cú click chuột!
 
-*(Lưu ý: Tên kho mã nguồn và file chạy tải về vẫn giữ tiền tố `codex-setup-*` để đảm bảo tính tương thích).*
+*(Nâng cấp: nếu bạn từng dùng app "Codex Setup" cũ, có thể xóa nó sau khi cài "Lunovant Setup.app". Cài đặt và key đã lưu vẫn được giữ nguyên. Lệnh `codex-setup` cũ vẫn dùng được như một tên gọi khác.)*
 
 ---
 
 ## Bắt đầu nhanh (4 bước đơn giản)
 
 1. **Tải về**: Tải bản cài đặt phù hợp với hệ điều hành máy tính của bạn trong mục Releases trên GitHub ([xem liên kết tải về bên dưới](#tải-về)).
-2. **Mở ứng dụng**: Mở Lunovant Setup (`Codex Setup.app` trên macOS, hoặc bấm đúp vào `codex-setup-windows-x64.exe` trên Windows).
+2. **Mở ứng dụng**: Mở Lunovant Setup (`Lunovant Setup.app` trên macOS, hoặc bấm đúp vào `lunovant-setup-windows-x64.exe` trên Windows).
    > **Lưu ý cho người dùng Windows**: Ở lần mở đầu tiên, tính năng SmartScreen của Windows sẽ hiện thông báo **"Windows protected your PC"** (do file chạy chưa được đăng ký chứng chỉ số). Bạn chỉ cần bấm vào chữ **More info**, sau đó chọn **Run anyway**. Ứng dụng hoàn toàn không yêu cầu quyền quản trị viên (Administrator).
 3. **Dán key**: Dán key Lunovant của bạn (key Orion, Lyra hoặc combo) vào ô **Dán key Lunovant**.
 4. **Bấm "Cài đặt" & bắt đầu dùng**: Bấm nút **Cài đặt** (**Install**). Ứng dụng sẽ tự động kiểm tra key, nhận diện gói sản phẩm, kiểm tra các model đang chạy tốt và ghi cấu hình an toàn kèm bản sao lưu tự động. Sau khi hoàn tất, bạn có thể bắt đầu sử dụng ngay (mở Codex Desktop/CLI, hoặc gõ lệnh `claude` trong terminal hay mở trong VS Code/Cursor)!
@@ -71,7 +71,7 @@ Nếu bạn đã đăng nhập tài khoản Claude cá nhân từ trước trên
   - **Tài khoản Claude (cá nhân)**: Mặc định quay về dùng gói cá nhân của bạn. Khi cần dùng Lunovant, bạn chỉ cần gõ `claude --settings ~/.claude/lunovant-settings.json`.
 - **Cách chuyển chế độ**:
   - Trên giao diện đồ họa: Bấm nút chuyển đổi chế độ ở mục Claude Code.
-  - Qua dòng lệnh CLI: Chạy `codex-setup mode lunovant --line claude` hoặc `codex-setup mode personal --line claude`.
+  - Qua dòng lệnh CLI: Chạy `lunovant-setup mode lunovant --line claude` hoặc `lunovant-setup mode personal --line claude`.
   - Khởi động lại terminal hoặc reload cửa sổ IDE sau khi chuyển.
 - **Cam kết quyền riêng tư**:
   - Ứng dụng chỉ kiểm tra xem trên máy đã có đăng nhập hay chưa (bằng cách kiểm tra sự hiện diện của trường `oauthAccount` trong file `~/.claude.json`). Công cụ **tuyệt đối không bao giờ** đọc, lưu trữ, ghi log hay gửi mật khẩu, token hay tài khoản cá nhân của bạn từ file `.credentials.json` hay kho khóa hệ điều hành đi đâu cả.
@@ -90,7 +90,7 @@ Nếu bạn đã đăng nhập tài khoản ChatGPT cá nhân trong Codex từ t
   - **Tài khoản ChatGPT**: Trả về dùng tài khoản ChatGPT cá nhân làm mặc định. Khi cần dùng Lunovant, bạn gõ lệnh `codex -p lunovant` trong terminal.
 - **Cách chuyển đổi**:
   - Trên giao diện đồ họa: Bấm nút chuyển chế độ (**Lunovant** / **Tài khoản ChatGPT**) trong ô **Chế độ đang dùng**.
-  - Qua dòng lệnh CLI: Chạy `codex-setup mode lunovant --line codex` hoặc `codex-setup mode personal --line codex`.
+  - Qua dòng lệnh CLI: Chạy `lunovant-setup mode lunovant --line codex` hoặc `lunovant-setup mode personal --line codex`.
   - Khởi động lại app Codex Desktop hoặc tải lại cửa sổ VS Code (`⌘⇧P` / `Ctrl+Shift+P` → **Developer: Reload Window**) sau khi chuyển chế độ.
 - **Tách riêng lịch sử trò chuyện**:
   - Lịch sử chat được lưu riêng cho từng chế độ. Cuộc trò chuyện cá nhân và Lunovant không bị trộn lẫn; khi bạn chuyển lại về chế độ cũ, lịch sử tương ứng sẽ xuất hiện lại đầy đủ.
@@ -163,16 +163,16 @@ Các chức năng cấu hình chuyên sâu trước đây cho Codex (Model, API 
 
 ## Tải về
 
-1. Truy cập mục Releases trên GitHub và tải file tương ứng với máy của bạn:
-   - `codex-setup-windows-x64.exe` (cho Windows)
-   - `codex-setup-macos-arm64-app.zip` (cho Mac chip Apple Silicon)
-   - `codex-setup-macos-x64-app.zip` (cho Mac chip Intel)
-   - `codex-setup-macos-arm64` / `codex-setup-macos-x64` (bản dòng lệnh Mac)
-   - `codex-setup-linux-x64` (bản dòng lệnh Linux)
+1. Truy cập mục [Releases trên GitHub](https://github.com/lunovant/lunovant-setup/releases) và tải file tương ứng với máy của bạn:
+   - `lunovant-setup-windows-x64.exe` (cho Windows)
+   - `lunovant-setup-macos-arm64-app.zip` (cho Mac chip Apple Silicon)
+   - `lunovant-setup-macos-x64-app.zip` (cho Mac chip Intel)
+   - `lunovant-setup-macos-arm64` / `lunovant-setup-macos-x64` (bản dòng lệnh Mac)
+   - `lunovant-setup-linux-x64` (bản dòng lệnh Linux)
 2. Tải thêm file `.sha256` tương ứng để kiểm tra tính toàn vẹn của file:
-   - macOS: `shasum -a 256 codex-setup-macos-arm64`
-   - Linux: `sha256sum codex-setup-linux-x64`
-   - Windows (PowerShell): `Get-FileHash .\codex-setup-windows-x64.exe -Algorithm SHA256`
+   - macOS: `shasum -a 256 lunovant-setup-macos-arm64`
+   - Linux: `sha256sum lunovant-setup-linux-x64`
+   - Windows (PowerShell): `Get-FileHash .\lunovant-setup-windows-x64.exe -Algorithm SHA256`
 
 ---
 
@@ -180,7 +180,7 @@ Các chức năng cấu hình chuyên sâu trước đây cho Codex (Model, API 
 
 ### Windows
 
-Bấm đúp vào file `codex-setup-windows-x64.exe`.
+Bấm đúp vào file `lunovant-setup-windows-x64.exe`.
 Vì file chạy chưa được ký chứng chỉ số đắt tiền của Microsoft, màn hình SmartScreen sẽ hiện thông báo màu xanh:
 > **"Windows protected your PC"**
 
@@ -189,26 +189,26 @@ Bạn chỉ cần bấm vào **More info**, sau đó chọn **Run anyway**. Ứn
 
 ### macOS
 
-Tải file `codex-setup-macos-arm64-app.zip` (hoặc bản `x64`), giải nén và kéo file **Codex Setup.app** vào thư mục `Applications` (Ứng dụng).
+Tải file `lunovant-setup-macos-arm64-app.zip` (hoặc bản `x64`), giải nén và kéo file **Lunovant Setup.app** vào thư mục `Applications` (Ứng dụng).
 
 Nếu dùng bản CLI độc lập trong Terminal:
 ```bash
-chmod +x ./codex-setup-macos-arm64
-./codex-setup-macos-arm64
+chmod +x ./lunovant-setup-macos-arm64
+./lunovant-setup-macos-arm64
 ```
 
 Nếu Gatekeeper trên Mac chặn file dòng lệnh:
 ```bash
-chmod +x ./codex-setup-macos-arm64
-xattr -d com.apple.quarantine ./codex-setup-macos-arm64 2>/dev/null; ./codex-setup-macos-arm64
+chmod +x ./lunovant-setup-macos-arm64
+xattr -d com.apple.quarantine ./lunovant-setup-macos-arm64 2>/dev/null; ./lunovant-setup-macos-arm64
 ```
 Hoặc trong Finder, bấm chuột phải vào file, chọn **Open**, rồi bấm xác nhận **Open**.
 
 ### Linux
 
 ```bash
-chmod +x ./codex-setup-linux-x64
-./codex-setup-linux-x64
+chmod +x ./lunovant-setup-linux-x64
+./lunovant-setup-linux-x64
 ```
 
 ---
@@ -239,27 +239,27 @@ Các tùy chọn chung: `--codex-home PATH`, `--lang en|vi`. Các lệnh ghi c�
 
 ```bash
 # Cài đặt tự động một chạm qua stdin (không bao giờ truyền key dưới dạng tham số dòng lệnh)
-pbpaste | codex-setup setup --auto
+pbpaste | lunovant-setup setup --auto
 
 # Cài đặt tự động nhưng giữ tài khoản cá nhân làm mặc định
-pbpaste | codex-setup setup --auto --keep-personal
+pbpaste | lunovant-setup setup --auto --keep-personal
 
 # Chuyển đổi chế độ cho toàn bộ các dòng sản phẩm
-codex-setup mode lunovant
-codex-setup mode personal
+lunovant-setup mode lunovant
+lunovant-setup mode personal
 
 # Chuyển đổi chế độ riêng cho từng sản phẩm
-codex-setup mode lunovant --line claude    # Chỉ đổi cho Claude Code
-codex-setup mode lunovant --line codex     # Chỉ đổi cho Codex
-codex-setup mode                          # Xem chế độ hiện tại
+lunovant-setup mode lunovant --line claude    # Chỉ đổi cho Claude Code
+lunovant-setup mode lunovant --line codex     # Chỉ đổi cho Codex
+lunovant-setup mode                          # Xem chế độ hiện tại
 
 # Tiện ích cho Codex
-codex-setup model gpt-6.1-terra
-codex-setup test
-codex-setup sandbox unelevated
+lunovant-setup model gpt-6.1-terra
+lunovant-setup test
+lunovant-setup sandbox unelevated
 ```
 
-> **Mẹo bảo mật**: Tuyệt đối không truyền khóa API trực tiếp làm tham số dòng lệnh (như `-k` hay `--key`), vì khóa sẽ bị lưu vào lịch sử gõ lệnh của máy và danh sách tiến trình (`ps`). Hãy truyền qua stdin như hướng dẫn: `pbpaste | codex-setup setup --auto` (trên macOS) hoặc `Get-Clipboard | codex-setup setup --auto` (trên PowerShell Windows).
+> **Mẹo bảo mật**: Tuyệt đối không truyền khóa API trực tiếp làm tham số dòng lệnh (như `-k` hay `--key`), vì khóa sẽ bị lưu vào lịch sử gõ lệnh của máy và danh sách tiến trình (`ps`). Hãy truyền qua stdin như hướng dẫn: `pbpaste | lunovant-setup setup --auto` (trên macOS) hoặc `Get-Clipboard | lunovant-setup setup --auto` (trên PowerShell Windows).
 
 ---
 
@@ -300,7 +300,7 @@ experimental_bearer_token = "sk-..."
 
 **`~/.codex/lunovant.config.toml`** (file profile cố định):
 ```toml
-# Managed by Codex Setup Manager: use with codex -p lunovant
+# Managed by Lunovant Setup: use with codex -p lunovant
 model_provider = "lunovant"
 model = "gpt-6.1-sol"
 ```
@@ -315,16 +315,16 @@ Codex trên Windows chạy các lệnh thực thi trong môi trường sandbox v
 
 Nếu gặp lỗi sandbox ("Couldn't check Windows setup" hoặc "Unable to send message"), hãy chuyển sang chế độ `unelevated`:
 ```cmd
-codex-setup sandbox unelevated
+lunovant-setup sandbox unelevated
 ```
 
-Nếu muốn quay lại mặc định ban đầu của Codex: `codex-setup sandbox remove`.
+Nếu muốn quay lại mặc định ban đầu của Codex: `lunovant-setup sandbox remove`.
 
 ---
 
 ## Xử lý sự cố thường gặp
 
-Hãy chạy `codex-setup test` và `codex-setup diagnose` đầu tiên khi gặp lỗi.
+Hãy chạy `lunovant-setup test` và `lunovant-setup diagnose` đầu tiên khi gặp lỗi.
 
 - **401 Unauthorized**: Key không chính xác, đã hết hạn hoặc bị dán thiếu ký tự. Hãy kiểm tra lại key của bạn.
 - **403 Forbidden**: Gói dịch vụ của key không có quyền truy cập model này. Hãy kiểm tra lại gói của bạn tại trang quản lý Lunovant.
@@ -338,11 +338,11 @@ Hãy chạy `codex-setup test` và `codex-setup diagnose` đầu tiên khi gặp
 
 Mọi thao tác thay đổi cấu hình đều được tự động tạo bản sao lưu trước:
 ```bash
-codex-setup backup list
-codex-setup backup restore ID
-codex-setup backup original
-codex-setup uninstall --dry-run
-codex-setup uninstall
+lunovant-setup backup list
+lunovant-setup backup restore ID
+lunovant-setup backup original
+lunovant-setup uninstall --dry-run
+lunovant-setup uninstall
 ```
 
 Lệnh gỡ cài đặt (`uninstall`) sẽ đưa các file cấu hình về trạng thái ban đầu, gỡ bỏ cài đặt Lunovant và chỉ xóa key khi bạn xác nhận. Tuyệt đối không xóa dữ liệu trò chuyện của bạn.

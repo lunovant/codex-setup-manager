@@ -72,7 +72,7 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
     # config
     if not ctx.config_path.exists():
         results.append(_r("config", Outcome.WARN, "config.toml not found", str(ctx.config_path),
-                          "Run `codex-setup setup` to create it.", "dgc_config_missing",
+                          "Run `lunovant-setup setup` to create it.", "dgc_config_missing",
                           path=ctx.config_path))
     else:
         try:
@@ -83,7 +83,7 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
         except ConfigParseError as exc:
             where = f" (line {exc.line}, col {exc.col})" if exc.line else ""
             results.append(_r("config", Outcome.FAIL, "config.toml is invalid", f"{exc}{where}",
-                              "Fix the file or restore a backup with `codex-setup backup restore`.",
+                              "Fix the file or restore a backup with `lunovant-setup backup restore`.",
                               "dgc_config_invalid", error=f"{exc}{where}"))
         except CodexSetupError as exc:
             results.append(_r("config", Outcome.FAIL, "config.toml cannot be read", str(exc), "",
@@ -96,14 +96,14 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
         if not provider:
             results.append(_r("provider", Outcome.WARN, "model_provider not set",
                               "Codex uses its default provider (openai).",
-                              "Run `codex-setup setup` to select a provider.", "dgc_provider_unset"))
+                              "Run `lunovant-setup setup` to select a provider.", "dgc_provider_unset"))
         elif provider in codex_config.RESERVED_PROVIDER_IDS:
             results.append(_r("provider", Outcome.OK, f"Built-in provider: {provider}",
                               code="dgc_provider_builtin", provider=provider))
         elif provider not in status.provider_ids:
             results.append(_r("provider", Outcome.FAIL, "Provider mismatch",
                               f"model_provider = \"{provider}\" but no [model_providers.{provider}] table is defined.",
-                              "Run `codex-setup setup` to define it, or fix model_provider.",
+                              "Run `lunovant-setup setup` to define it, or fix model_provider.",
                               "dgc_provider_mismatch", provider=provider))
         else:
             results.append(_r("provider", Outcome.OK, f"Provider defined: {provider}",
@@ -116,7 +116,7 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
             if not env_key and not bearer:
                 results.append(_r("env_key", Outcome.WARN, "Provider has no env_key",
                                   f"[model_providers.{provider}] does not name an API key variable.",
-                                  "Run `codex-setup setup` to set env_key.", "dgc_env_key_missing",
+                                  "Run `lunovant-setup setup` to set env_key.", "dgc_env_key_missing",
                                   provider=provider))
 
     if env_key:
@@ -133,21 +133,21 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
         elif stored:
             results.append(_r("env_var", Outcome.WARN, f"{env_key} is not set in this environment",
                               "The key is stored but this process does not export it.",
-                              "Start Codex with `codex-setup launch`, or opt in to `codex-setup env install`.",
+                              "Start Codex with `lunovant-setup launch`, or opt in to `lunovant-setup env install`.",
                               "dgc_env_var_unexported", env_key=env_key))
         elif bearer:
             pass  # the key lives in config.toml (experimental_bearer_token)
         else:
             results.append(_r("env_var", Outcome.FAIL, f"{env_key} is not set",
                               "No environment variable and no stored key.",
-                              "Run `codex-setup api --key-stdin` to store the key.",
+                              "Run `lunovant-setup api --key-stdin` to store the key.",
                               "dgc_env_var_unset", env_key=env_key))
         if stored:
             results.append(_r("secret", Outcome.OK, "API key stored", f"backend: {ctx.secret_store.backend_name}",
                               code="dgc_secret_ok", backend=ctx.secret_store.backend_name))
         else:
             results.append(_r("secret", Outcome.WARN, "No API key stored", f"backend: {ctx.secret_store.backend_name}",
-                              "Run `codex-setup api --key-stdin`.", "dgc_secret_missing",
+                              "Run `lunovant-setup api --key-stdin`.", "dgc_secret_missing",
                               backend=ctx.secret_store.backend_name))
 
     # codex install
@@ -169,7 +169,7 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
         mode = status.windows_sandbox if status else None
         results.append(_r("sandbox_mode", Outcome.OK if mode else Outcome.WARN,
                           f"Windows sandbox: {mode or 'not set'}", "",
-                          "" if mode else "Try `codex-setup sandbox unelevated` first.",
+                          "" if mode else "Try `lunovant-setup sandbox unelevated` first.",
                           "dgc_sandbox_mode_set" if mode else "dgc_sandbox_mode_unset",
                           mode=mode or ""))
         secrets.extend(collect_secrets(ctx, env_key, None))
@@ -181,7 +181,7 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
         bad = [redact(line, secrets)[:300] for line in lines if _ERROR_RE.search(line)]
         if bad:
             results.append(_r("sandbox_log", Outcome.WARN, "Errors in sandbox.log", "\n".join(bad[-10:]),
-                              "Try `codex-setup sandbox unelevated`; the tool never disables the sandbox.",
+                              "Try `lunovant-setup sandbox unelevated`; the tool never disables the sandbox.",
                               "dgc_sandbox_log_errors"))
         else:
             results.append(_r("sandbox_log", Outcome.OK if lines else Outcome.SKIP, "sandbox.log",
@@ -195,8 +195,8 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
         oc = {"ok": Outcome.OK, "warn": Outcome.WARN, "fail": Outcome.FAIL}.get(overall, Outcome.WARN)
         results.append(_r("last_test", oc, f"Last API test: {overall or 'unknown'}",
                           f"{lt.get('when', '')} model={lt.get('model', '')}",
-                          "" if oc == Outcome.OK else "Run `codex-setup test`.",
+                          "" if oc == Outcome.OK else "Run `lunovant-setup test`.",
                           "dgc_last_test", overall=overall or "?"))
     else:
-        results.append(_r("last_test", Outcome.SKIP, "No API test yet", "", "Run `codex-setup test`.", "dgc_last_test_none"))
+        results.append(_r("last_test", Outcome.SKIP, "No API test yet", "", "Run `lunovant-setup test`.", "dgc_last_test_none"))
     return results

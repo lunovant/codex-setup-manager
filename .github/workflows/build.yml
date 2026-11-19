@@ -24,14 +24,14 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: codex-setup-windows-x64.exe
+            artifact: lunovant-setup-windows-x64.exe
           - os: macos-15
-            artifact: codex-setup-macos-arm64
+            artifact: lunovant-setup-macos-arm64
           - os: macos-15-intel
-            artifact: codex-setup-macos-x64
+            artifact: lunovant-setup-macos-x64
           # Oldest supported glibc, so the binary runs on Ubuntu 22.04 and 24.04.
           - os: ubuntu-22.04
-            artifact: codex-setup-linux-x64
+            artifact: lunovant-setup-linux-x64
     steps:
       - uses: actions/checkout@v7
 
@@ -134,23 +134,23 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: scripts/notarize_macos.sh "dist/Codex Setup.app"
+        run: scripts/notarize_macos.sh "dist/Lunovant Setup.app"
 
       - name: Gatekeeper check (app)
         if: runner.os == 'macOS' && env.MACOS_SIGNING == 'true'
         run: |
           set -euo pipefail
-          zip="$(ls dist/codex-setup-macos-*-app.zip | head -n 1)"
+          zip="$(ls dist/lunovant-setup-macos-*-app.zip | head -n 1)"
           work="$RUNNER_TEMP/gatekeeper-app"
           rm -rf "$work"
           mkdir -p "$work"
           cp "$zip" "$work/app.zip"
           xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$work/app.zip"
           ditto -x -k "$work/app.zip" "$work/out"
-          app="$work/out/Codex Setup.app"
+          app="$work/out/Lunovant Setup.app"
           spctl --assess --type execute -vv "$app" 2>&1 | tee "$work/spctl.txt"
           grep -q "accepted" "$work/spctl.txt"
-          out="$(perl -e 'alarm 60; exec @ARGV' "$app/Contents/MacOS/Codex Setup" --version)"
+          out="$(perl -e 'alarm 60; exec @ARGV' "$app/Contents/MacOS/Lunovant Setup" --version)"
           echo "$out"
           if [ -z "$out" ]; then
             echo "::error::Quarantined app did not print a version"
