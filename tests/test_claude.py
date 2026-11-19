@@ -8,6 +8,7 @@ import os
 import shlex
 import stat
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -75,6 +76,11 @@ def _profile():
 def _write_settings(text: str):
     _settings().parent.mkdir(parents=True, exist_ok=True)
     _settings().write_bytes(text.encode("utf-8"))
+
+
+def _put(path, text: str) -> None:
+    """Write exact LF bytes: ``Path.write_text`` would turn ``\\n`` into CRLF on Windows."""
+    path.write_bytes(text.encode("utf-8"))
 
 
 def _env_of(path) -> dict:
@@ -328,7 +334,7 @@ def test_uninstall_removes_only_our_unchanged_values(svc):
     data = json.loads(_settings().read_text())
     data["env"]["ANTHROPIC_AUTH_TOKEN"] = "user-edited"
     data["extra"] = True
-    _settings().write_text(json.dumps(data, indent=2))
+    _put(_settings(), json.dumps(data, indent=2))
     res = svc.uninstall()
     assert res.changed
     out = json.loads(_settings().read_text())
@@ -571,7 +577,7 @@ def test_existing_token_restored_on_personal_and_uninstall(svc):
     assert "other-token-123" not in json.dumps(load_state().claude)
     data = json.loads(_settings().read_text())
     data["theme"] = "light"  # user edits another field: exact-original shortcut no longer applies
-    _settings().write_text(json.dumps(data, indent=2))
+    _put(_settings(), json.dumps(data, indent=2))
     svc.claude_set_mode("personal")
     env = _env_of(_settings())
     assert env["ANTHROPIC_AUTH_TOKEN"] == "other-token-123"
@@ -628,7 +634,7 @@ def test_uninstall_keeps_modified_profile(svc):
     svc.one_click_setup(KEY, client=make_client(CLAUDE))
     data = json.loads(_profile().read_text())
     data["note"] = "mine"
-    _profile().write_text(json.dumps(data))
+    _put(_profile(), json.dumps(data))
     res = svc.uninstall()
     assert _profile().exists() and any(k == "un_claude_profile_changed" for k, _ in res.notes)
     assert load_state().claude is None
@@ -713,11 +719,11 @@ def _legacy_install(svc, original):
     old = "claude-opus-5-5"
     data.pop("model", None)
     data["env"]["ANTHROPIC_MODEL"] = old
-    _settings().write_text(claude_config.dumps(data))
+    _put(_settings(), claude_config.dumps(data))
     prof = json.loads(_profile().read_text())
     prof["env"]["ANTHROPIC_MODEL"] = old
     text = claude_config.dumps(prof)
-    _profile().write_text(text)
+    _put(_profile(), text)
     st = load_state()
     st.claude["written"]["ANTHROPIC_MODEL"] = claude_config.sha(old)
     st.claude["profile_sha"] = claude_config.sha(text)
@@ -746,7 +752,7 @@ def test_migration_keeps_foreign_model_env(svc):
     _legacy_install(svc, ORIGINAL)
     data = json.loads(_settings().read_text())
     data["env"]["ANTHROPIC_MODEL"] = "my-model"
-    _settings().write_text(claude_config.dumps(data))
+    _put(_settings(), claude_config.dumps(data))
     svc.claude_set_mode("lunovant")
     assert _env_of(_settings())["ANTHROPIC_MODEL"] == "my-model"
 
@@ -757,7 +763,7 @@ def test_uninstall_keeps_changed_model(svc):
     data = json.loads(_settings().read_text())
     assert data["model"] == "opus"
     data["model"] = "haiku"
-    _settings().write_text(claude_config.dumps(data))
+    _put(_settings(), claude_config.dumps(data))
     svc.uninstall()
     assert json.loads(_settings().read_text()) == {**json.loads(ORIGINAL), "model": "haiku"}
 
@@ -795,3 +801,18 @@ def test_profile_migration_retries_after_write_failure(svc, monkeypatch):
     assert load_state().claude["profile_sha"] == claude_config.sha(_profile().read_text())
     svc.uninstall()
     assert not _profile().exists()
+
+
+def test_put_keeps_lf_when_write_text_translates_newlines(tmp_path, monkeypatch):
+    """Regression: on Windows write_text gave CRLF, so recorded sha != on-disk sha."""
+    real = Path.write_text
+
+    def crlf_write_text(self, data, encoding=None, errors=None, newline=None):
+        return real(self, data.replace("\n", "\r\n"), encoding=encoding, errors=errors, newline="")
+
+    monkeypatch.setattr(Path, "write_text", crlf_write_text)
+    target = tmp_path / "p.json"
+    text = claude_config.dumps({"env": {"A": "1"}})
+    _put(target, text)
+    assert b"\r" not in target.read_bytes()
+    assert claude_config.sha(target.read_bytes().decode("utf-8")) == claude_config.sha(text)

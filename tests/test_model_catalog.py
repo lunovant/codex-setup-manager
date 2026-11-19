@@ -7,6 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import tomlkit
 
 from codex_setup.app import SetupService
 from codex_setup.core import model_catalog as mc
@@ -559,8 +560,12 @@ def test_refresh_adds_removes_and_is_idempotent(svc: SetupService) -> None:
 def test_refresh_invalid_binary_removes_key_and_file(svc: SetupService, fake: FakeCodex) -> None:
     svc.one_click_setup(KEY, client=make_client())
     # config as it is without our catalog key
-    expected = svc.config_path.read_text(encoding="utf-8").replace(
-        f'model_catalog_json = "{svc.catalog_file}"\n', "")
+    # TOML escapes backslashes, so a Windows path is written as "C:\\\\Users\\\\..."
+    toml_path = tomlkit.item(str(svc.catalog_file)).as_string()
+    line = f"model_catalog_json = {toml_path}\n"
+    before = svc.config_path.read_text(encoding="utf-8")
+    assert line in before
+    expected = before.replace(line, "")
     fake.failing.add("/b/codex")
     res = svc.refresh_catalog(client=make_client(SOLD_IDS + ["gpt-6.3-sol"]))
     assert res.changed and res.code == "removed" and res.params == {"version": "0.169.0-alpha.11.1"}
