@@ -47,6 +47,34 @@ def codex_home(env: Mapping[str, str] | None = None, *, system: str | None = Non
     return _home(e, system) / ".codex"
 
 
+def claude_home(env: Mapping[str, str] | None = None, *, system: str | None = None) -> Path:
+    """``$CLAUDE_CONFIG_DIR`` if set, else ``~/.claude``."""
+    e = _env(env)
+    value = e.get("CLAUDE_CONFIG_DIR")
+    if value and value.strip():
+        return _expand(value.strip(), e, system)
+    return _home(e, system) / ".claude"
+
+
+def claude_settings_path(env: Mapping[str, str] | None = None, *, system: str | None = None) -> Path:
+    return claude_home(env, system=system) / "settings.json"
+
+
+def claude_profile_path(env: Mapping[str, str] | None = None, *, system: str | None = None) -> Path:
+    return claude_home(env, system=system) / "lunovant-settings.json"
+
+
+def claude_global_state_path(
+    env: Mapping[str, str] | None = None, *, system: str | None = None
+) -> Path:
+    """Claude Code's ``.claude.json``: inside ``$CLAUDE_CONFIG_DIR`` when set, else ``~/.claude.json``."""
+    e = _env(env)
+    value = e.get("CLAUDE_CONFIG_DIR")
+    if value and value.strip():
+        return _expand(value.strip(), e, system) / ".claude.json"
+    return _home(e, system) / ".claude.json"
+
+
 def config_path(env: Mapping[str, str] | None = None, *, system: str | None = None) -> Path:
     return codex_home(env, system=system) / "config.toml"
 

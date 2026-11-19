@@ -64,6 +64,8 @@ class ConfigOwnership:
     # provider id -> {"prev": bool (had a token before us), "sha": sha256 of the token we wrote}.
     # Never holds the token; a previous token is recovered from the private original snapshot.
     bearer_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # legacy top-level `profile = ...` we removed ({"value", "tables"}); reported, never restored
+    legacy_profile: dict[str, Any] | None = None
 
     def is_empty(self) -> bool:
         return not (
@@ -87,6 +89,7 @@ class ConfigOwnership:
             "credentials": {k: list(v) for k, v in self.credentials.items()},
             "env_installs": self.env_installs,
             "bearer_tokens": self.bearer_tokens,
+            "legacy_profile": self.legacy_profile,
         }
 
     @classmethod
@@ -119,7 +122,10 @@ class ConfigOwnership:
         bearer = _expect(d.get("bearer_tokens", {}), dict, "bearer_tokens")
         for k, v in bearer.items():
             _expect(v, dict, "bearer token record")
-        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer)
+        legacy = d.get("legacy_profile")
+        if legacy is not None:
+            _expect(legacy, dict, "legacy_profile")
+        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer, legacy)
 
 
 def _expect(value: Any, typ: type, what: str) -> Any:
@@ -149,6 +155,8 @@ class AppState:
     configs: dict[str, ConfigOwnership] = field(default_factory=dict)
     # last successful one-click setup: models, probe results, key info (never the key itself)
     one_click: dict[str, Any] | None = None
+    # Claude Code line: what this tool wrote into settings.json (hashes only, never the key)
+    claude: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +167,7 @@ class AppState:
             "last_test": self.last_test,
             "configs": {k: c.to_dict() for k, c in self.configs.items()},
             "one_click": self.one_click,
+            "claude": self.claude,
         }
 
     @classmethod
@@ -178,6 +187,9 @@ class AppState:
         one_click = d.get("one_click")
         if one_click is not None:
             _expect(one_click, dict, "one_click")
+        claude = d.get("claude")
+        if claude is not None:
+            _expect(claude, dict, "claude")
         raw_configs = _expect(d.get("configs", {}), dict, "configs")
         configs = {str(k): ConfigOwnership.from_dict(v) for k, v in raw_configs.items()}
         legacy = {
@@ -199,6 +211,7 @@ class AppState:
             last_test=last,
             configs=configs,
             one_click=one_click,
+            claude=claude,
         )
 
 

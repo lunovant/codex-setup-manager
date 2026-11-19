@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shlex
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -19,12 +20,21 @@ from typing import Any
 import tomlkit
 
 from codex_setup.core import backup as backup_mod
-from codex_setup.core import codex_config, paths
+import json
+
+from codex_setup.core import claude_config, codex_config, paths
 from codex_setup.core.backup import BackupInfo
-from codex_setup.core.config_store import SaveResult, load_config, save_config
+from codex_setup.core.config_store import (
+    diff_text,
+    SaveResult,
+    atomic_write_text,
+    load_config,
+    save_config,
+)
 from codex_setup.core.errors import (
     CodexSetupError,
     ConfigParseError,
+    ConfigWriteError,
     SecretStoreError,
     ValidationError,
 )
@@ -63,6 +73,28 @@ from codex_setup.security.redact import mask_key
 from codex_setup.security.secrets import SecretStore
 
 
+PROFILE_NAME = "lunovant"
+PROFILE_HEADER = "# Managed by Codex Setup Manager: use with  codex -p lunovant"
+MODES = ("lunovant", "personal")
+
+
+def format_key_info(info: Mapping[str, Any] | None) -> dict[str, str | None]:
+    """Presentation-neutral key info: plan omitted when unknown, remaining as ``N`` (2 decimals).
+
+    ``expires`` is None when the key has no expiry (the caller supplies the localized text).
+    """
+    info = info or {}
+    plan = str(info.get("plan") or "").strip() or None
+    rem = info.get("remaining")
+    remaining: str | None = None
+    if isinstance(rem, (int, float)) and not isinstance(rem, bool):
+        remaining = f"{round(float(rem), 2):g}"
+    elif rem not in (None, ""):
+        remaining = str(rem)
+    expires = str(info.get("expires_at") or "").strip() or None
+    return {"plan": plan, "remaining": remaining, "expires": expires}
+
+
 def make_secret_store(backend: str = "auto", env: Mapping[str, str] | None = None) -> SecretStore:
     """Build a SecretStore. ``keyring`` is strict: it errors instead of falling back to session."""
     store = SecretStore("auto" if backend == "keyring" else backend, env=env)
@@ -93,13 +125,24 @@ def normalize_key(key: str | None) -> str:
 @dataclass
 class OneClickResult:
     ok: bool
-    code: str  # "ok" | key_invalid | key_expired | not_codex_key | no_model_works | key_empty | network
+    code: str  # "ok" | key_invalid | key_expired | not_codex_key (no gpt-*/claude-* model) | no_model_works | key_empty | network
     message: str
     key_info: dict[str, Any] = field(default_factory=dict)
     models: list[dict[str, Any]] = field(default_factory=list)
     default_model: str | None = None
     config_path: Path | None = None
     backup_path: Path | None = None
+    mode: str = "lunovant"
+    legacy_profile: str | None = None  # removed top-level `profile = ...` (it breaks Codex)
+    legacy_profile_tables: list[str] = field(default_factory=list)  # untouched [profiles.*]
+    line: str = "codex"  # "codex" | "claude": which product this result describes
+    # Claude line only: the models we configure ({"opus": id, ...}), the profile file and the
+    # command that always uses Lunovant.
+    claude_models: dict[str, str] = field(default_factory=dict)
+    profile_path: Path | None = None
+    # one entry per product set up in this run ("codex" / "claude"); the top-level fields above
+    # describe the first of them (Codex when present) so single-line callers keep working
+    sections: dict[str, OneClickResult] = field(default_factory=dict)
 
 
 @dataclass
@@ -148,6 +191,7 @@ class SetupService:
         self._stores: dict[str, SecretStore] = {}
         self._platform: PlatformInfo | None = None
         self._install: CodexInstall | None = None
+        self._legacy: tuple[str | None, list[str]] = (None, [])
 
     # -- environment -------------------------------------------------------
     @property
@@ -249,6 +293,125 @@ class SetupService:
             st = codex_config.get_status(doc)
             own.original_top_level = {"model": st.model, "model_provider": st.model_provider}
 
+    # -- ChatGPT login / modes / profile file --------------------------------
+    def chatgpt_login_present(self) -> bool:
+        """True when ``$CODEX_HOME/auth.json`` is a personal ChatGPT login. Only the mode is
+        inspected; token values are never kept, logged or returned."""
+        try:
+            data = json.loads((paths.codex_home(self._env) / "auth.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        return data.get("auth_mode") == "chatgpt" or bool(data.get("tokens"))
+
+    def codex_installed(self) -> bool:
+        """True when config.toml has our provider table."""
+        if not self.config_path.exists():
+            return False
+        try:
+            return LUNOVANT.id in codex_config.get_status(load_config(self.config_path).doc).provider_ids
+        except ConfigParseError:
+            return False
+
+    def current_mode(self) -> str:
+        """``lunovant`` when the top-level provider is ours, else ``personal``."""
+        if not self.config_path.exists():
+            return "personal"
+        st = codex_config.get_status(load_config(self.config_path).doc)
+        return "lunovant" if st.model_provider == LUNOVANT.id else "personal"
+
+    @property
+    def profile_file(self) -> Path:
+        return paths.profile_config_path(PROFILE_NAME, self._env)
+
+    def _profile_file_ours(self) -> bool:
+        try:
+            return self.profile_file.read_text(encoding="utf-8").startswith(PROFILE_HEADER)
+        except (OSError, UnicodeDecodeError):
+            return False
+
+    def _write_profile_file(self, model: str) -> None:
+        """``$CODEX_HOME/lunovant.config.toml`` for ``codex -p lunovant`` (no secrets inside)."""
+        path = self.profile_file
+        text = self._profile_text(model)
+        if self._profile_text(model) == self._read_profile_or_none():
+            return
+        atomic_write_text(path, text)
+
+    def _read_profile_or_none(self) -> str | None:
+        if not self.profile_file.exists():
+            return None
+        try:
+            return self.profile_file.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return "\0unreadable"
+
+    @staticmethod
+    def _profile_text(model: str) -> str:
+        return f"{PROFILE_HEADER}\n{tomlkit.dumps({'model_provider': LUNOVANT.id, 'model': model})}"
+
+    def _prepare_profile(self, model: str) -> None:
+        """Back up an existing profile file before it changes. Runs BEFORE config/state are
+        written; a failed backup aborts. Profile backups live outside the config backup list
+        (``backup restore`` only knows config.toml)."""
+        existing = self._read_profile_or_none()
+        if existing is None or existing == self._profile_text(model):
+            return
+        path = self.profile_file
+        directory = paths.app_state_dir(self._env) / "profile-backups"
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            dest = directory / f"{path.name}.{stamp}.bak"
+            if os.name == "posix":
+                fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as out:
+                    out.write(path.read_bytes())
+            else:
+                dest.write_bytes(path.read_bytes())
+        except OSError as exc:
+            raise ConfigWriteError(
+                f"Cannot back up {path}: {exc}; nothing was changed", path=path
+            ) from exc
+
+    def _remove_profile_file(self) -> None:
+        if self._profile_file_ours():
+            try:
+                self.profile_file.unlink()
+            except OSError:
+                pass
+
+    @staticmethod
+    def _strip_legacy_profile(doc: Any) -> tuple[str | None, list[str]]:
+        """Drop a top-level ``profile = ...`` (Codex refuses to start with it); report
+        ``[profiles.*]`` tables, which Codex ignores, and leave them alone."""
+        removed: str | None = None
+        if "profile" in doc and not isinstance(doc["profile"], dict):
+            value = doc["profile"]
+            removed = str(value.unwrap() if hasattr(value, "unwrap") else value)
+            del doc["profile"]
+        tables = doc.get("profiles")
+        names = [str(k) for k in tables.keys()] if isinstance(tables, dict) else []
+        return removed, names
+
+    @staticmethod
+    def _enter_mode(doc: Any, own: ConfigOwnership, mode: str, model: str) -> None:
+        """Set the top-level provider/model for ``mode`` (our provider table is left as is)."""
+        st = codex_config.get_status(doc)
+        if st.model_provider != LUNOVANT.id and own.original_top_level is not None:
+            # already on the user's own values (possibly edited since we recorded them): keep
+            # the record fresh so a later round trip restores what the user has now
+            own.original_top_level["model"] = st.model
+            own.original_top_level["model_provider"] = st.model_provider
+        if mode == "lunovant":
+            codex_config.set_active(doc, LUNOVANT.id, model)
+        elif st.model_provider != LUNOVANT.id:
+            return  # personal already: leave the top-level untouched
+        else:
+            orig = own.original_top_level or {}
+            codex_config.restore_top_level(doc, orig.get("model"), orig.get("model_provider"))
+
     def _edit(
         self,
         mutate: Callable[[Any, AppState, ConfigOwnership], None],
@@ -270,24 +433,45 @@ class SetupService:
         if not dry_run:
             backup_mod.ensure_original_snapshot(self.config_path, own, self._env)
         self._record_original(own, loaded.doc)
+        removed, tables = self._strip_legacy_profile(loaded.doc)
+        self._legacy = (removed, tables)
+        if removed is not None:
+            own.legacy_profile = {"value": removed, "tables": tables}
         mutate(loaded.doc, state, own)
+        note = ("legacy_profile_removed", {"value": removed}) if removed is not None else None
         if dry_run:
-            return save_config(loaded, dry_run=True, reason=reason, env=self._env)
+            res = save_config(loaded, dry_run=True, reason=reason, env=self._env)
+            if note:
+                res.notes.append(note)
+            return res
         self._prune(state)
         if state_first:
             save_state(state, self._env)
         if before_write is not None:
             before_write()
         result = save_config(loaded, dry_run=False, reason=reason, env=self._env)
+        if note:
+            result.notes.append(note)
         if not state_first:
             save_state(state, self._env)
         return result
 
-    def _active(self) -> _Active:
+    def _active(self, ours: bool = False) -> _Active:
+        """Active provider. ``ours=True``: our provider even in personal mode."""
         path = self.config_path
         if not path.exists():
             return _Active(None, None, None, None, None)
         st = codex_config.get_status(load_config(path).doc)
+        if ours and st.model_provider != LUNOVANT.id and LUNOVANT.id in st.provider_ids:
+            doc = load_config(path).doc
+            providers = doc.get("model_providers")
+            table = codex_config._plain(providers[LUNOVANT.id]) if providers is not None else None
+            prof = load_state(self._env).profiles.get(LUNOVANT.id)
+            env_key = (table or {}).get("env_key") or None
+            if not env_key and (table or {}).get(codex_config.BEARER_FIELD):
+                env_key = LUNOVANT.env_key
+            return _Active(LUNOVANT.id, env_key, (table or {}).get("base_url") or None,
+                           prof.model if prof else None, table)
         table = st.active_provider
         env_key = (table or {}).get("env_key") or None
         base_url = (table or {}).get("base_url") or None
@@ -372,6 +556,8 @@ class SetupService:
         env_key = spec.env_key or LUNOVANT.env_key or ""
 
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            if not dry_run:
+                self._prepare_profile(model)
             self._upsert(doc, spec, own)
             codex_config.set_active(doc, spec.id, model)
             prev = state.profiles.get(spec.id)
@@ -388,7 +574,10 @@ class SetupService:
             if key:
                 self._store_call(store.set, env_key, key)
 
-        return self._edit(mutate, "quick setup", dry_run, before_write=before_write)
+        result = self._edit(mutate, "quick setup", dry_run, before_write=before_write)
+        if not dry_run:
+            self._write_profile_file(model)
+        return result
 
     # -- one-click setup ----------------------------------------------------
     def one_click_setup(
@@ -398,8 +587,15 @@ class SetupService:
         progress: Callable[[str, dict[str, Any]], None] | None = None,
         *,
         client: Any = None,
+        mode: str = "lunovant",
+        claude_mode: str | None = None,
     ) -> OneClickResult:
-        """Paste a key -> verify -> list/probe models -> write config. Writes nothing on failure."""
+        """Paste a key -> verify -> detect the line(s) from ``/v1/models`` (``gpt-*`` = Codex,
+        ``claude-*`` = Claude Code, both = set up both) -> probe -> write config.
+
+        ``mode`` applies to Codex, ``claude_mode`` (default: ``mode``) to Claude Code. Each line
+        writes nothing when its own checks fail. The returned object describes the first line
+        set up (the first failing one if any line failed); ``sections`` holds one result per line."""
 
         def note(step: str, **detail: Any) -> None:
             if progress is not None:
@@ -412,6 +608,8 @@ class SetupService:
             note("done", ok=False, code=code, message=message)
             return OneClickResult(False, code, message, **kw)
 
+        if mode not in MODES or (claude_mode is not None and claude_mode not in MODES):
+            raise ValidationError(f"Unsupported mode: {mode!r}")
         key = normalize_key(key)
         if not key:
             return stop("key_empty", "Chưa nhập key.")
@@ -434,16 +632,50 @@ class SetupService:
         note("check_key", **info)
 
         note("fetch_models")
-        fetched = model_probe.fetch_models(url, key, **http)
+        fetched = [m for m in model_probe.fetch_models(url, key, **http)
+                   if not model_probe.is_excluded_model(m)]
         note("fetch_models", models=fetched)
-        if not fetched or not any(m.startswith("gpt-") for m in fetched):
+        has_codex = any(m.startswith("gpt-") for m in fetched)
+        has_claude = any(claude_config.is_claude_model(m) for m in fetched)
+        if not (has_codex or has_claude):
             return stop(
                 "not_codex_key",
-                "Key này thuộc dòng khác (ví dụ Claude), không dùng được cho Codex. "
-                "Hãy dùng trình cài đặt Claude Code trên website.",
+                "Key này không có model Codex (gpt-*) hay Claude (claude-*) nào.",
                 key_info=info,
             )
+        note("fetch_models", models=fetched, lines=[
+            n for n, on in (("codex", has_codex), ("claude", has_claude)) if on])
 
+        parts: dict[str, OneClickResult] = {}
+        if has_codex:
+            # Only GPT models belong to Codex; other ids (gemini-*, deepseek-*, …) are not sold for it.
+            gpt = [m for m in fetched if m.startswith("gpt-")]
+            parts["codex"] = self._codex_setup(key, url, info, gpt, http, note, mode)
+        if has_claude:
+            parts["claude"] = self._claude_setup(
+                key, url, info, fetched, http, note, claude_mode or mode)
+        first = parts.get("codex") or parts["claude"]
+        failed = next((p for p in parts.values() if not p.ok), None)
+        top = replace(failed or first, ok=failed is None, sections=parts)
+        note("done", ok=top.ok, code=top.code, message=top.message, default_model=top.default_model)
+        return top
+
+    def _codex_setup(
+        self,
+        key: str,
+        url: str,
+        info: dict[str, Any],
+        fetched: list[str],
+        http: dict[str, Any],
+        note: Callable[..., None],
+        mode: str,
+    ) -> OneClickResult:
+        """Codex line: probe every gpt model, write config.toml. Writes nothing on failure."""
+
+        def stop(code: str, message: str, **kw: Any) -> OneClickResult:
+            return OneClickResult(False, code, message, **kw)
+
+        fetched = [m for m in fetched if not claude_config.is_claude_model(m)]
         results = model_probe.probe_models(
             url, key, fetched, **http,
             on_result=lambda r: note(f"probe:{r['model']}", **r),
@@ -466,8 +698,9 @@ class SetupService:
             store = None  # best effort: the key is also in config.toml
 
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            self._prepare_profile(default)
             self._upsert(doc, spec, own, bearer_token=key)
-            codex_config.set_active(doc, spec.id, default)
+            self._enter_mode(doc, own, mode, default)
             if self.sandbox_applicable():
                 st = codex_config.get_status(doc)
                 if st.windows_sandbox is None:
@@ -492,12 +725,320 @@ class SetupService:
             }
 
         saved = self._edit(mutate, "one-click setup", False)
+        self._write_profile_file(default)
         path = self.config_path
-        note("done", ok=True, code="ok", default_model=default)
+        removed, tables = self._legacy
+        message = f"Đã cài xong. Model mặc định: {default}."
+        if mode == "personal":
+            message += " Tài khoản ChatGPT vẫn là mặc định; gõ `codex -p lunovant` để dùng Lunovant."
+        if removed:
+            message += (f' Đã xoá dòng cũ `profile = "{removed}"` trong config.toml '
+                        "(Codex bản mới không khởi động được nếu còn dòng này).")
+        if tables:
+            message += (" Các mục [profiles.*] cũ được giữ nguyên "
+                        "(Codex bản mới bỏ qua chúng).")
         return OneClickResult(
-            True, "ok", f"Đã cài xong. Model mặc định: {default}.", info, results, default,
-            path, saved.backup,
+            True, "ok", message, info, results, default, path, saved.backup,
+            mode=mode, legacy_profile=removed, legacy_profile_tables=tables,
         )
+
+    def set_mode(self, mode: str, dry_run: bool = False) -> SaveResult:
+        """Switch the top-level provider/model between ``lunovant`` and the user's own.
+
+        The provider table and ``lunovant.config.toml`` stay in both modes, so
+        ``codex -p lunovant`` always works."""
+        if mode not in MODES:
+            raise ValidationError(f"Unsupported mode: {mode!r}")
+        chosen: list[str] = []
+
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            if LUNOVANT.id not in codex_config.get_status(doc).provider_ids:
+                raise CodexSetupError("Lunovant is not set up yet. Run the setup first.")
+            prof = state.profiles.get(LUNOVANT.id)
+            model = (prof.model if prof else None) or (state.one_click or {}).get(
+                "default_model"
+            ) or DEFAULT_MODEL
+            chosen.append(model)
+            if not dry_run:
+                self._prepare_profile(model)
+            self._enter_mode(doc, own, mode, model)
+
+        result = self._edit(mutate, f"mode {mode}", dry_run)
+        if not dry_run and chosen:
+            self._write_profile_file(chosen[0])
+        return result
+
+    # -- Claude Code line ----------------------------------------------------
+    CLAUDE_PROFILE_ARG = "~/.claude/lunovant-settings.json"
+
+    @property
+    def claude_settings_path(self) -> Path:
+        return paths.claude_settings_path(self._env)
+
+    @property
+    def claude_profile_path(self) -> Path:
+        return paths.claude_profile_path(self._env)
+
+    def claude_login_present(self) -> bool:
+        """True when ``.claude.json`` has a personal ``oauthAccount`` (presence only)."""
+        return claude_config.personal_login_present(self._env)
+
+    def claude_installed(self) -> bool:
+        rec = load_state(self._env).claude
+        return bool(
+            rec
+            and rec.get("settings_path") == str(self.claude_settings_path)
+            and claude_config.read_profile_env(self.claude_profile_path) is not None
+        )
+
+    def claude_current_mode(self) -> str:
+        """``lunovant`` when settings.json carries the same endpoint + token as our profile."""
+        prof = claude_config.read_profile_env(self.claude_profile_path)
+        if not prof:
+            return "personal"
+        try:
+            data, _ = claude_config.read_json_object(self.claude_settings_path)
+        except ConfigParseError:
+            return "personal"
+        env = data.get("env") or {}
+        same = all(env.get(k) == prof[k] for k in ("ANTHROPIC_BASE_URL", claude_config.TOKEN_KEY))
+        return "lunovant" if same else "personal"
+
+    def claude_profile_arg(self) -> str:
+        """Shell-ready path of the profile file for ``--settings``: the ``~`` form at the default
+        location, else the real path (``CLAUDE_CONFIG_DIR``), quoted for the platform."""
+        if not (self.env.get("CLAUDE_CONFIG_DIR") or "").strip():
+            return self.CLAUDE_PROFILE_ARG
+        path = str(self.claude_profile_path)
+        if self.platform.system == "windows":
+            return f'"{path}"' if " " in path else path
+        return shlex.quote(path)
+
+    def claude_profile_command(self) -> str:
+        return f"claude --settings {self.claude_profile_arg()}"
+
+    def claude_launch_command(self, mode: str | None = None) -> str:
+        """What to type in a terminal: plain ``claude`` when Lunovant is the default, else the
+        ``--settings`` form that always uses Lunovant."""
+        mode = mode or self.claude_current_mode()
+        return "claude" if mode == "lunovant" else self.claude_profile_command()
+
+    @staticmethod
+    def _mask_secrets(text: str) -> str:
+        return re.sub(
+            r'("[A-Za-z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)[A-Za-z0-9_]*"\s*:\s*")[^"]*(")',
+            r"\1****\2", text, flags=re.IGNORECASE,
+        )
+
+    def _claude_edit(
+        self,
+        mutate: Callable[[dict[str, Any], dict[str, Any]], None],
+        reason: str,
+        dry_run: bool,
+        *,
+        extra: dict[str, Any] | None = None,
+        clear: bool = False,
+        state_last: bool = False,
+        before_write: Callable[[], None] | None = None,
+    ) -> SaveResult:
+        """load settings.json -> mutate(data, ownership) -> [backup, save state] -> write.
+
+        Never writes unparsable input; the first touch snapshots the original, and when the
+        result equals that original the original bytes are written back (exact round trip).
+        Diffs mask token-like values. ``state_last`` (ownership-removing operations) saves the
+        state only after the file was written, so a failed write can be retried."""
+        path = self.claude_settings_path
+        state = load_state(self._env)
+        old = state.claude if state.claude and state.claude.get("settings_path") == str(path) else None
+        rec: dict[str, Any] = json.loads(json.dumps(old)) if old else {
+            "settings_path": str(path), "written": {}, "prev": {}}
+        data, old_text = claude_config.read_json_object(path)
+        mutate(data, rec)
+        if extra:
+            rec.update(extra)
+        new_text: str | None = claude_config.dumps(data)
+        orig = rec.get("original_backup")
+        if not rec.get("written") and orig and Path(orig).is_file():
+            try:
+                orig_data, _ = claude_config.read_json_object(Path(orig))
+                if orig_data == data:
+                    new_text = Path(orig).read_bytes().decode("utf-8")
+            except (ConfigParseError, OSError, UnicodeDecodeError):
+                pass
+        if rec.get("original_exists") is False and not data:
+            new_text = None  # we created the file; nothing of the user's is left in it
+        if old_text is None and new_text is not None and not data and not rec.get("written"):
+            new_text = None  # do not create an empty settings.json
+        changed = new_text != old_text
+        diff = diff_text(
+            self._mask_secrets(old_text or ""), self._mask_secrets(new_text or ""), path
+        ) if changed else ""
+        if dry_run:
+            return SaveResult(changed, diff, None, True)
+        backup: Path | None = None
+        if "original_exists" not in rec:
+            rec["original_exists"] = old_text is not None
+            if old_text is not None:
+                backup = backup_mod.create_backup(
+                    path, "original", self._env,
+                    prefix=claude_config.BACKUP_PREFIX, suffix=".json")
+                rec["original_backup"] = str(backup)
+        if changed and old_text is not None and backup is None:
+            backup = backup_mod.create_backup(
+                path, reason, self._env, prefix=claude_config.BACKUP_PREFIX, suffix=".json")
+        if rec.get("prev_token") and not rec.get("prev_token_backup") and backup is not None:
+            rec["prev_token_backup"] = str(backup)  # private copy that still holds their token
+        state.claude = None if clear else rec
+        if not state_last:
+            save_state(state, self._env)
+        if before_write is not None:
+            before_write()
+        if changed:
+            if new_text is None:
+                path.unlink(missing_ok=True)
+            else:
+                claude_config.write_private(path, new_text)
+        if state_last:
+            save_state(state, self._env)
+        return SaveResult(changed, diff, backup, False)
+
+    def _write_claude_profile(self, vals: dict[str, str]) -> None:
+        """``~/.claude/lunovant-settings.json``: only the env block, 0600 (it holds the key)."""
+        path = self.claude_profile_path
+        text = claude_config.profile_text(vals)
+        try:
+            existing = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            existing = None
+        if existing == text:
+            return
+        if existing is not None:
+            backup_mod.create_backup(path, "claude profile", self._env,
+                                     prefix="claude-profile", suffix=".json")
+        claude_config.write_private(path, text)
+
+    def _claude_setup(
+        self,
+        key: str,
+        url: str,
+        info: dict[str, Any],
+        fetched: list[str],
+        http: dict[str, Any],
+        note: Callable[..., None],
+        mode: str,
+    ) -> OneClickResult:
+        """Claude Code line: probe only the three models we configure, write settings.json and
+        the profile file. Writes nothing on failure."""
+        available = [m for m in fetched if claude_config.is_claude_model(m)]
+        picks = claude_config.pick_models(available)
+        order = [picks[f] for f in claude_config.FAMILIES]
+        targets = list(dict.fromkeys(order))
+        note("claude_models", models=available, targets=targets)
+        probed = model_probe.probe_claude_models(
+            url, key, targets, **http,
+            on_result=lambda r: note(f"claude_probe:{r['model']}", **r),
+        )
+        for r in probed:
+            r["role"] = "/".join(f for f in claude_config.FAMILIES if picks[f] == r["model"])
+        rows: list[dict[str, Any]] = probed + [
+            {"model": m, "ok": None, "tested": False, "latency_ms": None,
+             "status_code": None, "error": None}
+            for m in available if m not in targets
+        ]
+        passing = {r["model"] for r in probed if r["ok"]}
+        if not passing:
+            return OneClickResult(False, "no_model_works", "Không model Claude nào chạy được "
+                                  "với key này.", info, rows, line="claude")
+        default = next(m for m in order if m in passing)
+        final = {f: (picks[f] if picks[f] in passing else default) for f in claude_config.FAMILIES}
+        origin = claude_config.origin_of(url)
+        vals = claude_config.env_values(origin, key, final, default)
+
+        note("claude_write", model=default)
+        profile = self.claude_profile_path
+        try:
+            old_profile = profile.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            old_profile = None
+
+        def mutate(data: dict[str, Any], rec: dict[str, Any]) -> None:
+            if mode == "lunovant":
+                claude_config.apply_env(data, vals, rec)
+            else:
+                claude_config.remove_env(data, rec)
+
+        try:
+            saved = self._claude_edit(
+                mutate, "claude setup", False,
+                before_write=lambda: self._write_claude_profile(vals),
+                extra={"mode": mode, "profile_sha": claude_config.sha(
+                    claude_config.profile_text(vals)), "one_click": {
+                "when": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "base_url": origin, "models": available, "results": rows, "key_info": info,
+                "default_model": default, "picks": final}},
+            )
+        except Exception:
+            # settings.json could not be committed: put the previous profile back
+            try:
+                if old_profile is None:
+                    profile.unlink(missing_ok=True)
+                else:
+                    claude_config.write_private(profile, old_profile)
+            except OSError:
+                pass
+            raise
+        message = f"Đã cài xong Claude Code. Model mặc định: {default}."
+        if mode == "personal":
+            message += (" Tài khoản Claude cá nhân vẫn là mặc định; gõ "
+                        f"`{self.claude_profile_command()}` để dùng Lunovant.")
+        return OneClickResult(
+            True, "ok", message, info, rows, default, self.claude_settings_path, saved.backup,
+            mode=mode, line="claude", claude_models=final, profile_path=self.claude_profile_path,
+        )
+
+    def claude_set_mode(self, mode: str, dry_run: bool = False) -> SaveResult:
+        """``lunovant``: our env in settings.json (taken from the profile file).
+        ``personal``: our unchanged env keys removed; the profile file stays, so
+        ``claude --settings ~/.claude/lunovant-settings.json`` keeps working."""
+        if mode not in MODES:
+            raise ValidationError(f"Unsupported mode: {mode!r}")
+        vals = claude_config.read_profile_env(self.claude_profile_path)
+        rec = load_state(self._env).claude
+        if vals is None or not rec:
+            raise CodexSetupError("Lunovant for Claude Code is not set up yet. Run the setup first.")
+        skipped: list[str] = []
+
+        def mutate(data: dict[str, Any], own: dict[str, Any]) -> None:
+            if mode == "lunovant":
+                claude_config.apply_env(data, vals, own)
+            else:
+                skipped.extend(claude_config.remove_env(data, own))
+
+        res = self._claude_edit(mutate, f"claude mode {mode}", dry_run, extra={"mode": mode},
+                                state_last=(mode == "personal"))
+        res.notes.extend(("un_claude_field_changed", {"field": k}) for k in skipped)
+        return res
+
+    def _claude_uninstall(self, dry_run: bool) -> SaveResult | None:
+        rec = load_state(self._env).claude
+        if not rec or rec.get("settings_path") != str(self.claude_settings_path):
+            return None
+        skipped: list[str] = []
+        res = self._claude_edit(
+            lambda data, own: skipped.extend(claude_config.remove_env(data, own)),
+            "claude uninstall", dry_run, clear=True, state_last=True)
+        profile = self.claude_profile_path
+        if profile.exists():
+            try:
+                ours = claude_config.sha(profile.read_bytes().decode("utf-8")) == rec.get("profile_sha")
+            except (OSError, UnicodeDecodeError):
+                ours = False
+            if not ours:
+                res.notes.append(("un_claude_profile_changed", {"path": str(profile)}))
+            elif not dry_run:
+                profile.unlink(missing_ok=True)
+        res.notes.extend(("un_claude_field_changed", {"field": k}) for k in skipped)
+        return res
 
     def set_default_model(self, model: str, dry_run: bool = False) -> SaveResult:
         """Change only the top-level ``model``."""
@@ -506,13 +1047,33 @@ class SetupService:
     def change_model(self, model: str, dry_run: bool = False) -> SaveResult:
         model = validate_model_name(model)
 
+        sync: list[str] = []
+
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            st = codex_config.get_status(doc)
+            if (st.model_provider != LUNOVANT.id and LUNOVANT.id in st.provider_ids
+                    and self._profile_file_ours()):
+                # personal mode: the top-level model belongs to the user; only our profile moves
+                prof = state.profiles.get(LUNOVANT.id)
+                if prof is not None:
+                    prof.model = model
+                sync.append(model)
+                if not dry_run:
+                    self._prepare_profile(model)
+                return
             codex_config.set_model(doc, model)
             prof = state.profiles.get(state.active_profile or "")
             if prof is not None:
                 prof.model = model
+            if st.model_provider == LUNOVANT.id and self._profile_file_ours():
+                sync.append(model)
+                if not dry_run:
+                    self._prepare_profile(model)
 
-        return self._edit(mutate, "change model", dry_run)
+        result = self._edit(mutate, "change model", dry_run)
+        if sync and not dry_run:
+            self._write_profile_file(sync[0])
+        return result
 
     def set_api(
         self,
@@ -772,7 +1333,7 @@ class SetupService:
             names.extend(working or listed or LUNOVANT_MODELS)
         if prof is not None:
             names.extend(prof.models)
-        return list(dict.fromkeys(names))
+        return [n for n in dict.fromkeys(names) if not model_probe.is_excluded_model(n)]
 
     def custom_models(self) -> list[str]:
         state = load_state(self._env)
@@ -932,6 +1493,17 @@ class SetupService:
 
     # -- uninstall ---------------------------------------------------------
     def uninstall(self, dry_run: bool = False, delete_secret: bool = False) -> SaveResult:
+        """Undo this tool's changes on both lines (Codex config.toml, Claude settings.json)."""
+        res = self._uninstall_codex(dry_run, delete_secret)
+        cres = self._claude_uninstall(dry_run)
+        if cres is not None:
+            res.changed = res.changed or cres.changed
+            res.diff = res.diff + cres.diff
+            res.backup = res.backup or cres.backup
+            res.notes.extend(cres.notes)
+        return res
+
+    def _uninstall_codex(self, dry_run: bool = False, delete_secret: bool = False) -> SaveResult:
         state0 = load_state(self._env)
         own0 = self.ownership(state0)
         if own0.is_empty() and not self.config_path.exists():
@@ -951,6 +1523,9 @@ class SetupService:
                 for name in skipped:
                     notes.append(("un_field_changed", {"provider": pid, "field": name}))
             self._restore_bearer(doc, own, notes)
+            if own.legacy_profile and self._legacy[0] is None:
+                notes.append(("legacy_profile_removed", {"value": str(own.legacy_profile["value"])}))
+            own.legacy_profile = None
             orig = own.original_top_level
             if orig is not None:
                 codex_config.restore_top_level(doc, orig.get("model"), orig.get("model_provider"))
@@ -975,7 +1550,9 @@ class SetupService:
                 env_keys.extend(ks)
 
         result = self._edit(mutate, "uninstall", dry_run, state_first=False)
-        result.notes = notes
+        if not dry_run:
+            self._remove_profile_file()
+        result.notes = notes + result.notes
         keys = list(dict.fromkeys(env_keys))
         if delete_secret and keys:
             if dry_run:
@@ -1050,4 +1627,8 @@ __all__ = [
     "clean_key",
     "make_secret_store",
     "ConfigParseError",
+    "MODES",
+    "OneClickResult",
+    "PROFILE_HEADER",
+    "format_key_info",
 ]

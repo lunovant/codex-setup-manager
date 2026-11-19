@@ -70,3 +70,21 @@ button.link { background: transparent; border: none; color: var(--accent); text-
 .oc-model.ok .st { color: var(--ok); } .oc-model.warn .st { color: var(--warn); } .oc-model .lat { color: var(--muted); }
 .oc-model button { padding: 1px 8px; font-size: 12px; }
 .oc-launch { align-items: center; margin-top: 14px; } .oc-defl { margin-left: auto; font-weight: 600; }
+.mode-ask { border: 1px solid var(--border); border-radius: 6px; margin: 10px 0; padding: 6px 12px; }
+.mode-ask legend { font-weight: 600; padding: 0 6px; }
+.mode-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 12px 0; }
+.mode-card h3 { margin: 0 0 6px; }
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; } .seg button:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.howto { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 12px 0; }
+.howto summary { cursor: pointer; font-weight: 600; }
+.howto h4 { margin: 12px 0 4px; }
+.howto p { margin: 4px 0; }
+.cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
+.cmd code { background: var(--code); border-radius: 4px; padding: 2px 6px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.cmd button { padding: 1px 8px; font-size: 12px; }
+.oc-sec { border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px 10px; margin: 12px 0; }
+.oc-sec h3 { margin: 8px 0 4px; }
+.mode-card h4 { margin: 0 0 6px; }

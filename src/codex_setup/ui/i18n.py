@@ -10,7 +10,7 @@ _LANG = "en"
 
 EN: dict[str, str] = {
     "version": "codex-setup {version}",
-    "app_title": "Codex Setup Manager",
+    "app_title": "Lunovant Setup",
     "hint_no_tty": "Run `codex-setup` in a terminal for the interactive menu, or `codex-setup --help`.",
     # header
     "hdr_os": "OS",
@@ -67,7 +67,15 @@ EN: dict[str, str] = {
     "qs_model": "Model",
     "qs_key": "API key (input hidden, leave empty to keep the stored key)",
     "qs_backend": "Where to store the key? (auto = OS keychain, session = this process only)",
-    "oc_key": "Key: {plan} · 💎 {remaining} · expires {expires}",
+    "oc_key": "Key: {body}",
+    "cli_no_expiry": "no expiry",
+    "cli_expires": "expires {when}",
+    "oc_mode_set": "Mode: {mode}.",
+    "mode_current": "Current mode: {mode}",
+    "mode_changed": "Mode changed to {mode}. Restart Codex Desktop / reload VS Code to apply. "
+                    "Chat history is split per mode: old chats of the other mode reappear when you switch back.",
+    "mode_need_setup": "Lunovant is not set up yet. Run `codex-setup setup --auto` first.",
+    "legacy_profile_removed": "Removed the legacy top-level `profile = \"{value}\"` from config.toml (new Codex refuses to start with it).",
     "oc_models": "Models ({n} working / {total}):",
     "oc_default": "Default model: {model}",
     "oc_config": "Config: {path}",
@@ -282,7 +290,7 @@ EN: dict[str, str] = {
 
 VI: dict[str, str] = {
     "version": "codex-setup {version}",
-    "app_title": "Codex Setup Manager",
+    "app_title": "Lunovant Setup",
     "hint_no_tty": "Chạy `codex-setup` trong terminal để dùng menu tương tác, hoặc `codex-setup --help`.",
     "hdr_os": "Hệ điều hành",
     "hdr_cli": "Codex CLI",
@@ -335,7 +343,15 @@ VI: dict[str, str] = {
     "qs_model": "Model",
     "qs_key": "API key (ẩn khi nhập, để trống để giữ key đã lưu)",
     "qs_backend": "Lưu key ở đâu? (auto = kho khoá của hệ điều hành, session = chỉ trong phiên này)",
-    "oc_key": "Key: {plan} · 💎 {remaining} · hạn {expires}",
+    "oc_key": "Key: {body}",
+    "cli_no_expiry": "không thời hạn",
+    "cli_expires": "hạn {when}",
+    "oc_mode_set": "Chế độ: {mode}.",
+    "mode_current": "Chế độ hiện tại: {mode}",
+    "mode_changed": "Đã chuyển sang chế độ {mode}. Đóng và mở lại Codex Desktop / VS Code để áp dụng. "
+                    "Lịch sử chat được tách theo chế độ: chat cũ của chế độ kia sẽ hiện lại khi bạn chuyển về.",
+    "mode_need_setup": "Chưa cài Lunovant. Hãy chạy `codex-setup setup --auto` trước.",
+    "legacy_profile_removed": "Đã xoá dòng cũ `profile = \"{value}\"` ở đầu config.toml (Codex bản mới không khởi động được nếu còn dòng này).",
     "oc_models": "Model ({n} chạy được / {total}):",
     "oc_default": "Model mặc định: {model}",
     "oc_config": "Cấu hình: {path}",
@@ -536,6 +552,34 @@ VI: dict[str, str] = {
     "err_unexpected": "Lỗi không mong đợi: {msg}",
     "err_debug_hint": "Chạy với CODEX_SETUP_DEBUG=1 để xem chi tiết.",
 }
+
+
+EN.update({
+    "un_claude_field_changed": "Left env.{field} in Claude settings.json unchanged: you modified it after setup.",
+    "un_claude_profile_changed": "Kept {path}: you modified it after setup.",
+    "oc_line_codex": "Codex",
+    "oc_line_claude": "Claude Code",
+    "oc_claude_models": "Models ({n} tested OK / {total} tested):",
+    "oc_untested": "available (not tested)",
+    "oc_profile": "Profile: {path}",
+    "oc_claude_use": "Run `{command}` in a terminal.",
+    "mode_line": "{line}: {mode}",
+    "mode_line_changed": "{line} mode: {mode}",
+    "mode_none_installed": "Nothing is set up yet. Run `codex-setup setup --auto` first.",
+})
+VI.update({
+    "un_claude_field_changed": "Giữ nguyên env.{field} trong settings.json của Claude: bạn đã sửa sau khi cài đặt.",
+    "un_claude_profile_changed": "Giữ nguyên {path}: bạn đã sửa sau khi cài đặt.",
+    "oc_line_codex": "Codex",
+    "oc_line_claude": "Claude Code",
+    "oc_claude_models": "Model ({n} chạy được / {total} đã kiểm tra):",
+    "oc_untested": "có sẵn (chưa kiểm tra)",
+    "oc_profile": "Profile: {path}",
+    "oc_claude_use": "Gõ `{command}` trong terminal.",
+    "mode_line": "{line}: {mode}",
+    "mode_line_changed": "Chế độ {line}: {mode}",
+    "mode_none_installed": "Chưa cài đặt gì. Hãy chạy `codex-setup setup --auto` trước.",
+})
 
 _TABLES: dict[str, dict[str, str]] = {"en": EN, "vi": VI}
 

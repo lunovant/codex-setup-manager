@@ -37,16 +37,26 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def create_backup(path: Path, reason: str = "", env: Mapping[str, str] | None = None) -> Path:
+def create_backup(
+    path: Path,
+    reason: str = "",
+    env: Mapping[str, str] | None = None,
+    *,
+    prefix: str = "config",
+    suffix: str = ".toml",
+) -> Path:
+    """Private copy of ``path`` in the backups dir. ``prefix``/``suffix`` pick the family:
+    config backups are ``config-*.toml`` (what ``list_backups`` shows); other files (Claude's
+    settings.json) use their own prefix so they never appear in that list."""
     path = Path(path)
     directory = paths.backups_dir(env)
     directory.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
-    stem = f"config-{now.strftime('%Y%m%d-%H%M%S-%f')}"
-    dest = directory / f"{stem}.toml"
+    stem = f"{prefix}-{now.strftime('%Y%m%d-%H%M%S-%f')}"
+    dest = directory / f"{stem}{suffix}"
     n = 1
     while dest.exists():  # extremely unlikely, keep ids unique anyway
-        dest = directory / f"{stem}-{n}.toml"
+        dest = directory / f"{stem}-{n}{suffix}"
         n += 1
     if os.name == "posix":
         # the config may hold experimental_bearer_token: never world-readable, even briefly
@@ -63,7 +73,8 @@ def create_backup(path: Path, reason: str = "", env: Mapping[str, str] | None = 
         "reason": reason,
         "sha256": _sha256(dest),
     }
-    dest.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    sidecar = dest.with_suffix(".json") if suffix == ".toml" else dest.with_name(dest.name + ".meta")
+    sidecar.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return dest
 
 

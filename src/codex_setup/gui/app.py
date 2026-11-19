@@ -9,7 +9,7 @@ from pathlib import Path
 
 from codex_setup.gui.api import GuiApi
 
-TITLE = "Codex Setup Manager"
+TITLE = "Lunovant Setup"
 
 
 def web_dir() -> Path:
