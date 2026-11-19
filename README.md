@@ -4,6 +4,49 @@ English | [Tiếng Việt](README.vi.md)
 
 Codex Setup Manager (`codex-setup`) configures OpenAI Codex (CLI and Desktop app) to use the Lunovant API. It edits your Codex `config.toml` safely, stores your API key in the operating system's secret store, tests the connection, and launches Codex with the key available.
 
+## Quick start
+
+1. **Download**: Download the release package for your operating system from GitHub Releases ([see links below](#download)).
+2. **Open app**: Launch Codex Setup (`Codex Setup.app` on macOS, or double-click `codex-setup-windows-x64.exe` on Windows).
+3. **Paste key**: Paste your Lunovant API key into the **Paste your Lunovant key** field.
+4. **Click "Set up Codex" & open Codex**: Click **Set up Codex** (**Cài đặt Codex**), wait for the automated verification to complete, then click **Open Codex Desktop** (or open Codex in VS Code / terminal) to start working!
+
+## Using it alongside your own ChatGPT account
+
+If you already use a personal ChatGPT account with Codex, Codex Setup Manager lets you use both side-by-side seamlessly:
+
+- **Two operational modes**:
+  - **Lunovant**: Everything (Codex Desktop app, VS Code / Cursor extensions, and the `codex` command) uses Lunovant by default.
+  - **ChatGPT account**: Everything defaults to your personal ChatGPT account. Lunovant remains accessible anytime via `codex -p lunovant` in the terminal.
+- **How to switch**:
+  - In the GUI: Click the mode toggle (**Lunovant** / **ChatGPT account**) in the **Current mode** card on the One-click setup screen.
+  - In the CLI: Run `codex-setup mode lunovant` or `codex-setup mode personal`.
+  - **Important**: After switching modes, restart the Codex Desktop app or reload VS Code (`⌘⇧P` / `Ctrl+Shift+P` → **Developer: Reload Window**) for the changes to take effect.
+- **Separate chat histories**:
+  - Session history is separated by mode in Codex. Your personal ChatGPT conversations and Lunovant conversations do not mix; when you switch back to a mode, your previous chat threads in that mode reappear.
+- **Cloud tasks and web search**:
+  - Codex cloud tasks and web search require ChatGPT account mode.
+- **Privacy regarding your ChatGPT login**:
+  - The tool never reads, logs, or transmits your ChatGPT login credentials (`auth.json`). It only checks whether a login file exists on your computer to allow switching modes.
+
+## How to use after setup
+
+After setup, you can use Codex across any environment:
+
+- **Codex Desktop / ChatGPT app**:
+  - Open the app and start chatting. The model picker will show your default model (e.g. `gpt-6.1-sol`). Restart the app after switching modes.
+- **VS Code / Cursor (Codex extension)**:
+  - Open the Codex panel in the right sidebar, or press `⌘⇧P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) and run **Codex: Open Codex Sidebar**.
+  - In Lunovant mode, you do not need to sign in with a ChatGPT account—start coding and asking questions immediately.
+  - Reload the IDE window (**Developer: Reload Window**) after switching modes.
+- **Terminal (CLI)**:
+  - `codex`: Runs Codex using your current default mode.
+  - `codex -p lunovant`: Always runs Codex with Lunovant (even when in ChatGPT personal mode).
+  - Inside Codex, type `/model` to view available models or switch models on the fly.
+- **Good to know**:
+  - **Chat titling**: Each new chat thread in the app or IDE makes an extra call to a lightweight model to automatically generate a conversation title (costing just a few hundredths of a 💎).
+  - **Check balance**: Check your remaining 💎 balance and plan details anytime at [https://ai.lunovant.tech/dashboard](https://ai.lunovant.tech/dashboard).
+
 ## What it does
 
 - Adds a Lunovant provider and a default model to `$CODEX_HOME/config.toml` (keeps your other settings and comments).
@@ -116,8 +159,9 @@ Global options: `--codex-home PATH`, `--lang en|vi`. Write commands accept `--dr
 | Command | Purpose |
 | --- | --- |
 | `status` | Show config, provider, model, key and Codex status |
-| `setup --auto [--base-url URL]` | One-click automated setup (reads key from stdin, probes models, writes config) |
+| `setup --auto [--keep-personal] [--base-url URL]` | One-click automated setup (reads key from stdin, probes models, writes config). Use `--keep-personal` to keep your ChatGPT login default |
 | `setup [--base-url URL] [--model M] [--key-stdin] [--secret-backend auto\|keyring\|file\|session]` | Quick Setup (step-by-step) |
+| `mode [lunovant\|personal]` | Show or switch the active default mode between Lunovant and personal ChatGPT account |
 | `model [NAME]` | Show or change the model |
 | `api [--base-url URL] [--key-stdin \| --delete-key]` | Change base URL or key, or delete the stored key |
 | `test [--model M]` | Test the connection |
@@ -135,6 +179,14 @@ Examples:
 ```bash
 # One-click setup via stdin (reads key from stdin; never pass the key as an argument)
 pbpaste | codex-setup setup --auto
+
+# One-click setup keeping your personal ChatGPT account as default
+pbpaste | codex-setup setup --auto --keep-personal
+
+# Switch default modes
+codex-setup mode lunovant                # switch default to Lunovant
+codex-setup mode personal                # switch default to personal ChatGPT account
+codex-setup mode                         # show current active mode
 
 codex-setup setup --dry-run              # preview the changes, write nothing
 codex-setup model gpt-6.1-terra          # switch model
@@ -161,6 +213,8 @@ The key is never printed in logs or passed via command-line arguments.
 
 ## Resulting config.toml
 
+When in **Lunovant mode**:
+
 ```toml
 model = "gpt-6.1-sol"
 model_provider = "lunovant"
@@ -172,7 +226,33 @@ wire_api = "responses"
 experimental_bearer_token = "sk-…"
 ```
 
-The file lives at `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows), or under `CODEX_HOME` if set. On macOS and Linux, it is created with permission mode `0600`. The built-in provider ids `openai`, `ollama`, `lmstudio`, `amazon-bedrock` and `gcp` are reserved; the tool never writes a table for them.
+When in **ChatGPT account mode**:
+
+The top-level `model_provider` line is absent (or restored to your personal settings), while the `[model_providers.lunovant]` table remains in `config.toml`:
+
+```toml
+model = "gpt-6.1-sol"
+
+[model_providers.lunovant]
+name = "Lunovant"
+base_url = "https://api.lunovant.tech/v1"
+wire_api = "responses"
+experimental_bearer_token = "sk-…"
+```
+
+### Profile file (`lunovant.config.toml`)
+
+In addition to `config.toml`, Codex Setup Manager creates `$CODEX_HOME/lunovant.config.toml` so that `codex -p lunovant` always works in both modes:
+
+```toml
+# Managed by Codex Setup Manager: use with  codex -p lunovant
+model_provider = "lunovant"
+model = "gpt-6.1-sol"
+```
+
+> **Note on legacy `profile = "..."` lines**: Newer versions of Codex refuse to start if a top-level `profile = "..."` line is present in `config.toml`. Codex Setup Manager automatically detects and removes any old top-level `profile = "..."` setting to ensure Codex starts normally, while preserving any existing `[profiles.*]` tables (which are simply ignored by newer Codex versions).
+
+The files live under `~/.codex/` (`%USERPROFILE%\.codex\` on Windows), or under `CODEX_HOME` if set. On macOS and Linux, `config.toml` is created with permission mode `0600`. The built-in provider ids `openai`, `ollama`, `lmstudio`, `amazon-bedrock` and `gcp` are reserved; the tool never writes a table for them.
 
 ## Windows sandbox
 

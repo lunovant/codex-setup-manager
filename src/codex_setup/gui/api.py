@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from codex_setup import __version__
-from codex_setup.app import SetupService
+from codex_setup.app import MODES, SetupService
 from codex_setup.core.config_store import SaveResult
 from codex_setup.core import codex_config
 from codex_setup.core.state import load_state, save_state
@@ -106,7 +106,17 @@ class GuiApi:
     def status(self) -> dict[str, Any]:
         def run() -> dict[str, Any]:
             st = self._svc.status()
+            mode, installed = None, False
+            if st.config_state == "ok":
+                mode = self._svc.current_mode()
+                installed = LUNOVANT.id in st.provider_ids and (
+                    self._svc.ownership().managed_provider_ids != []
+                    or load_state(self._svc._env).one_click is not None
+                )
             return {
+                "chatgpt_login": self._svc.chatgpt_login_present(),
+                "mode": mode,
+                "lunovant_installed": installed,
                 "version": __version__,
                 "os": {
                     "system": st.platform.system,
@@ -328,7 +338,11 @@ class GuiApi:
             return {str(k): self._scrub(v) for k, v in obj.items()}
         return obj
 
-    def one_click_start(self, key: str | None = None) -> dict[str, Any]:
+    def one_click_start(self, key: str | None = None, mode: str = "lunovant") -> dict[str, Any]:
+        if mode not in MODES:
+            return {"ok": False, "error": f"Unsupported mode: {mode!r}"}
+        if not self._svc.chatgpt_login_present():
+            mode = "lunovant"  # nothing personal to keep: no question, no choice
         key = (key or "").strip()
         if key:
             self._seen.append(key)
@@ -348,7 +362,7 @@ class GuiApi:
         def work() -> None:
             try:
                 with self._lock:  # same lock as every other config/state-changing API call
-                    res = self._svc.one_click_setup(key, None, progress)
+                    res = self._svc.one_click_setup(key, None, progress, mode=mode)
                 result: dict[str, Any] = {
                     "ok": bool(res.ok),
                     "code": res.code,
@@ -357,6 +371,8 @@ class GuiApi:
                     "models": res.models,
                     "default_model": res.default_model,
                     "has_backup": bool(res.backup_path),
+                    "mode": res.mode,
+                    "legacy_profile": res.legacy_profile,
                 }
             except Exception as exc:  # never leak raw tracebacks or secrets
                 msg = redact(f"{exc.__class__.__name__}: {exc}", self._seen)[:300]
@@ -387,7 +403,7 @@ class GuiApi:
             saved = state.one_click
             if not saved:
                 return {"has_last": False}
-            active = self._svc._active()
+            active = self._svc._active(ours=True)
             if not (active.table or {}).get(codex_config.BEARER_FIELD):
                 return {"has_last": False}
             if _norm_url(saved.get("base_url")) != _norm_url(active.base_url):
@@ -397,12 +413,25 @@ class GuiApi:
                     "has_last": True,
                     "when": saved.get("when"),
                     "key_info": saved.get("key_info"),
-                    "models": saved.get("models") or [],
-                    "results": saved.get("results") or [],
+                    "models": [m for m in saved.get("models") or []
+                               if not model_probe.is_excluded_model(str(m))],
+                    "results": [r for r in saved.get("results") or []
+                                if not (isinstance(r, dict)
+                                        and model_probe.is_excluded_model(str(r.get("model", ""))))],
                     "default_model": saved.get("default_model"),
                     "current_model": active.model,
                 }
             )
+
+        return self._guard(run)
+
+    def set_mode(self, mode: str, dry_run: bool = False) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            if mode == "personal" and not self._svc.chatgpt_login_present():
+                raise ValidationError(i18n.t("g_mode_no_login"))
+            out = self._diff(self._svc.set_mode(mode, bool(dry_run)))
+            out["mode"] = mode if not dry_run else self._svc.current_mode()
+            return out
 
         return self._guard(run)
 
@@ -414,13 +443,15 @@ class GuiApi:
             model_ = (model or "").strip()
             if not model_:
                 raise ValidationError("Model name is empty.")
+            if model_probe.is_excluded_model(model_):
+                raise ValidationError("This model is not a chat model and is not tested.")
             svc = self._svc
             with self._oc_lock:
                 if self._oc["running"]:
                     raise CodexSetupError("A setup is already running.")
                 ctx = self._oc.get("ctx")
                 oc_result = self._oc.get("result")
-            active = svc._active()
+            active = svc._active(ours=True)
             bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
             persist = False
             if ctx and oc_result is not None:

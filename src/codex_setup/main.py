@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from codex_setup import __version__
-from codex_setup.app import SetupService, StatusInfo
+from codex_setup.app import SetupService, StatusInfo, format_key_info
 from codex_setup.core.config_store import SaveResult
 from codex_setup.core.errors import CodexSetupError, ValidationError
 from codex_setup.providers.catalog import DEFAULT_MODEL, normalize_base_url, suggest_v1
@@ -67,7 +67,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--key-stdin", action="store_true", help="read the API key from stdin")
     p.add_argument("--auto", action="store_true",
                    help="one-click setup: key from stdin, models fetched and tested")
+    p.add_argument("--keep-personal", action="store_true",
+                   help="with --auto: keep your ChatGPT login as the default; use Lunovant "
+                        "only via `codex -p lunovant`")
     p.add_argument("--secret-backend", choices=["auto", "keyring", "file", "session"], default="auto")
+
+    p = add("mode", "show or switch the default mode (lunovant | personal)")
+    p.add_argument("name", nargs="?", choices=["lunovant", "personal"])
 
     p = add("model", "show or change the model")
     p.add_argument("name", nargs="?")
@@ -234,13 +240,12 @@ def _cmd_one_click(svc: SetupService, ns: argparse.Namespace) -> int:
         _err(t("oc_no_dry_run"))
         return 2
     key = _read_stdin_key()  # never from argv: it would leak into shell history and ps
+    mode = "personal" if getattr(ns, "keep_personal", False) else "lunovant"
     res = svc.one_click_setup(
-        key, _resolve_url(ns.base_url), lambda step, detail: None
+        key, _resolve_url(ns.base_url), lambda step, detail: None, mode=mode
     )
     if res.key_info.get("valid"):
-        _out(t("oc_key", plan=res.key_info.get("plan") or "?",
-               remaining=res.key_info.get("remaining", "?"),
-               expires=res.key_info.get("expires_at") or "-"))
+        _out(t("oc_key", body=format_key_line(res.key_info)))
     if res.models:
         ok = sum(1 for m in res.models if m["ok"])
         _out(t("oc_models", n=ok, total=len(res.models)))
@@ -252,8 +257,33 @@ def _cmd_one_click(svc: SetupService, ns: argparse.Namespace) -> int:
         _err(t("oc_fail", code=res.code, msg=redact(res.message, _SEEN_SECRETS)))
         return 1
     _out(t("oc_default", model=res.default_model))
+    _out(t("oc_mode_set", mode=res.mode))
     _out(t("oc_config", path=res.config_path))
+    if res.legacy_profile:
+        _out(t("legacy_profile_removed", value=res.legacy_profile))
     _out(t("oc_ok"))
+    return 0
+
+
+def format_key_line(info: dict[str, Any]) -> str:
+    """``plan · N💎 · expiry`` with the plan omitted when unknown."""
+    f = format_key_info(info)
+    parts: list[str] = []
+    if f["plan"]:
+        parts.append(f["plan"])
+    if f["remaining"] is not None:
+        parts.append(f"{f['remaining']}💎")
+    parts.append(t("cli_expires", when=f["expires"]) if f["expires"] else t("cli_no_expiry"))
+    return " · ".join(parts)
+
+
+def _cmd_mode(svc: SetupService, ns: argparse.Namespace) -> int:
+    if not ns.name:
+        _out(t("mode_current", mode=svc.current_mode()))
+        return 0
+    res = _apply(ns, lambda dry: svc.set_mode(ns.name, dry))
+    if res is not None and res.changed and not res.dry_run:
+        _out(t("mode_changed", mode=ns.name))
     return 0
 
 
@@ -465,6 +495,7 @@ def _cmd_uninstall(svc: SetupService, ns: argparse.Namespace) -> int:
 _HANDLERS: dict[str, Callable[[SetupService, argparse.Namespace], int]] = {
     "status": _cmd_status,
     "setup": _cmd_setup,
+    "mode": _cmd_mode,
     "model": _cmd_model,
     "api": _cmd_api,
     "test": _cmd_test,

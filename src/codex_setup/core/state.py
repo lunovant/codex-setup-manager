@@ -64,6 +64,8 @@ class ConfigOwnership:
     # provider id -> {"prev": bool (had a token before us), "sha": sha256 of the token we wrote}.
     # Never holds the token; a previous token is recovered from the private original snapshot.
     bearer_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # legacy top-level `profile = ...` we removed ({"value", "tables"}); reported, never restored
+    legacy_profile: dict[str, Any] | None = None
 
     def is_empty(self) -> bool:
         return not (
@@ -87,6 +89,7 @@ class ConfigOwnership:
             "credentials": {k: list(v) for k, v in self.credentials.items()},
             "env_installs": self.env_installs,
             "bearer_tokens": self.bearer_tokens,
+            "legacy_profile": self.legacy_profile,
         }
 
     @classmethod
@@ -119,7 +122,10 @@ class ConfigOwnership:
         bearer = _expect(d.get("bearer_tokens", {}), dict, "bearer_tokens")
         for k, v in bearer.items():
             _expect(v, dict, "bearer token record")
-        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer)
+        legacy = d.get("legacy_profile")
+        if legacy is not None:
+            _expect(legacy, dict, "legacy_profile")
+        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer, legacy)
 
 
 def _expect(value: Any, typ: type, what: str) -> Any:

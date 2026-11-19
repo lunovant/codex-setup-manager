@@ -15,6 +15,12 @@ from codex_setup.security.redact import redact
 INTERNAL_MODELS = frozenset({"codex-auto-review"})
 
 
+def is_excluded_model(name: str) -> bool:
+    """Internal and image models are not chat models Codex can use: never probe or offer them."""
+    low = name.strip().lower()
+    return low in INTERNAL_MODELS or "image" in low
+
+
 def _headers(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
@@ -35,7 +41,7 @@ def parse_models(data: Any) -> list[str]:
             name = item.get("id") or item.get("name")
         if isinstance(name, str) and name.strip():
             name = name.strip()
-            if name not in INTERNAL_MODELS and name not in out:
+            if not is_excluded_model(name) and name not in out:
                 out.append(name)
     return out
 

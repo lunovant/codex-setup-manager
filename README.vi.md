@@ -4,6 +4,49 @@
 
 Codex Setup Manager (`codex-setup`) giúp bạn cấu hình OpenAI Codex (bản CLI và ứng dụng Desktop) để dùng API của Lunovant. Công cụ sửa file `config.toml` của Codex một cách an toàn, lưu khóa API trong kho bí mật của hệ điều hành, kiểm tra kết nối và mở Codex kèm khóa API.
 
+## Bắt đầu nhanh
+
+1. **Tải về**: Tải bản cài đặt phù hợp với máy của bạn trong mục Releases trên GitHub ([xem liên kết tải về bên dưới](#tải-về)).
+2. **Mở ứng dụng**: Mở ứng dụng Codex Setup (`Codex Setup.app` trên macOS, hoặc bấm đúp vào `codex-setup-windows-x64.exe` trên Windows).
+3. **Dán key**: Dán key Lunovant của bạn vào ô **Dán key Lunovant**.
+4. **Bấm "Cài đặt Codex" & mở Codex**: Bấm **Cài đặt Codex**, đợi ứng dụng kiểm tra tự động xong rồi bấm **Mở Codex Desktop** (hoặc mở Codex trong VS Code / terminal) để bắt đầu sử dụng ngay!
+
+## Dùng cùng tài khoản ChatGPT cá nhân
+
+Nếu bạn đã đăng nhập tài khoản ChatGPT cá nhân trong Codex từ trước, Codex Setup Manager cho phép bạn dùng song song cả hai rất thuận tiện:
+
+- **Hai chế độ hoạt động**:
+  - **Lunovant**: Mọi nơi (ứng dụng Desktop, extension trong VS Code / Cursor và lệnh `codex`) đều dùng Lunovant làm mặc định.
+  - **Tài khoản ChatGPT**: Trả về dùng tài khoản ChatGPT cá nhân làm mặc định ở mọi nơi. Khi cần dùng Lunovant, bạn chỉ cần gõ lệnh `codex -p lunovant` trong terminal.
+- **Cách chuyển đổi**:
+  - Trên giao diện đồ họa (GUI): Bấm nút gạt chế độ (**Lunovant** / **Tài khoản ChatGPT**) trong ô **Chế độ đang dùng** ở màn hình Cài đặt nhanh.
+  - Qua dòng lệnh (CLI): Chạy lệnh `codex-setup mode lunovant` hoặc `codex-setup mode personal`.
+  - **Lưu ý**: Sau khi đổi chế độ, hãy khởi động lại ứng dụng Codex Desktop hoặc tải lại cửa sổ VS Code (`⌘⇧P` / `Ctrl+Shift+P` → chọn **Developer: Reload Window**) để thay đổi có hiệu lực.
+- **Tách riêng lịch sử chat theo từng chế độ**:
+  - Các đoạn chat được Codex lưu riêng biệt cho từng chế độ. Đoạn chat của tài khoản cá nhân và của Lunovant không bị lẫn vào nhau; khi bạn chuyển lại về chế độ cũ, lịch sử chat cũ của chế độ đó sẽ xuất hiện lại.
+- **Tính năng đám mây (Cloud task) và tìm kiếm web**:
+  - Các tính năng Cloud task và tìm kiếm web của Codex yêu cầu chế độ tài khoản ChatGPT cá nhân.
+- **Bảo mật đăng nhập ChatGPT**:
+  - Công cụ tuyệt đối không bao giờ đọc, ghi log hay gửi thông tin đăng nhập ChatGPT (`auth.json`) của bạn đi đâu cả. Công cụ chỉ kiểm tra xem file đăng nhập này có tồn tại trên máy hay không để hỗ trợ bạn chuyển đổi chế độ.
+
+## Cách dùng sau khi cài
+
+Sau khi cài đặt xong, bạn có thể dùng Codex ở bất kỳ đâu:
+
+- **Codex Desktop / ứng dụng ChatGPT**:
+  - Mở ứng dụng rồi bắt đầu cuộc trò chuyện. Khung chọn model sẽ hiện model mặc định của bạn (ví dụ `gpt-6.1-sol`). Hãy khởi động lại app sau khi đổi chế độ.
+- **VS Code / Cursor (extension Codex)**:
+  - Mở khung Codex ở thanh bên phải, hoặc bấm `⌘⇧P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) rồi chạy **Codex: Open Codex Sidebar**.
+  - Ở chế độ Lunovant, bạn không cần đăng nhập tài khoản ChatGPT—có thể bắt đầu hỏi đáp và viết code ngay lập tức.
+  - Hãy tải lại cửa sổ (bấm `⌘⇧P` / `Ctrl+Shift+P` → gõ **Developer: Reload Window**) sau khi đổi chế độ.
+- **Terminal (dòng lệnh)**:
+  - `codex`: Chạy Codex với chế độ mặc định hiện tại.
+  - `codex -p lunovant`: Luôn luôn dùng Lunovant (kể cả khi bạn đang để chế độ tài khoản ChatGPT cá nhân).
+  - Ngay trong phiên Codex, bạn có thể gõ `/model` để xem và đổi model đang dùng.
+- **Lưu ý**:
+  - **Đặt tên chat**: Mỗi khi bạn tạo một chat mới trong app hoặc IDE, Codex sẽ gọi thêm một model nhỏ để tự động đặt tên cho cuộc trò chuyện (chỉ tốn vài phần trăm 💎).
+  - **Xem số dư**: Bạn có thể tra cứu số dư 💎 và thông tin gói bất cứ lúc nào tại [https://ai.lunovant.tech/dashboard](https://ai.lunovant.tech/dashboard).
+
 ## Công cụ này làm gì
 
 - Thêm nhà cung cấp Lunovant và model mặc định vào `$CODEX_HOME/config.toml` (giữ nguyên các cài đặt và ghi chú khác của bạn).
@@ -116,8 +159,9 @@ Tùy chọn chung: `--codex-home PATH`, `--lang en|vi`. Các lệnh ghi dữ li�
 | Lệnh | Công dụng |
 | --- | --- |
 | `status` | Xem cấu hình, nhà cung cấp, model, khóa và trạng thái Codex |
-| `setup --auto [--base-url URL]` | Cài đặt nhanh tự động (đọc key từ stdin, kiểm tra model, ghi cấu hình) |
+| `setup --auto [--keep-personal] [--base-url URL]` | Cài đặt nhanh tự động (đọc key từ stdin, kiểm tra model, ghi cấu hình). Dùng `--keep-personal` nếu muốn giữ tài khoản ChatGPT làm mặc định |
 | `setup [--base-url URL] [--model M] [--key-stdin] [--secret-backend auto\|keyring\|file\|session]` | Cài đặt nhanh (từng bước) |
+| `mode [lunovant\|personal]` | Xem hoặc chuyển đổi chế độ mặc định giữa Lunovant và tài khoản ChatGPT cá nhân |
 | `model [NAME]` | Xem hoặc đổi model |
 | `api [--base-url URL] [--key-stdin \| --delete-key]` | Đổi base URL hoặc khóa, hoặc xóa khóa đã lưu |
 | `test [--model M]` | Kiểm tra kết nối |
@@ -135,6 +179,14 @@ Ví dụ:
 ```bash
 # Cài đặt nhanh qua stdin (đọc key từ stdin; không bao giờ truyền key làm tham số)
 pbpaste | codex-setup setup --auto
+
+# Cài đặt nhanh nhưng giữ tài khoản ChatGPT cá nhân làm mặc định
+pbpaste | codex-setup setup --auto --keep-personal
+
+# Chuyển đổi chế độ mặc định
+codex-setup mode lunovant                # chuyển sang mặc định dùng Lunovant
+codex-setup mode personal                # chuyển sang mặc định dùng tài khoản ChatGPT cá nhân
+codex-setup mode                         # kiểm tra chế độ hiện tại
 
 codex-setup setup --dry-run              # xem trước thay đổi, không ghi gì
 codex-setup model gpt-6.1-terra          # đổi model
@@ -161,6 +213,8 @@ Khóa không bao giờ được ghi ra log hay nhận qua tham số dòng lệnh
 
 ## config.toml sau khi cấu hình
 
+Khi ở **chế độ Lunovant**:
+
 ```toml
 model = "gpt-6.1-sol"
 model_provider = "lunovant"
@@ -172,7 +226,33 @@ wire_api = "responses"
 experimental_bearer_token = "sk-…"
 ```
 
-File nằm ở `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`), hoặc trong thư mục `CODEX_HOME` nếu bạn có đặt. Trên macOS và Linux, file được tạo với quyền `0600`. Các id nhà cung cấp dựng sẵn `openai`, `ollama`, `lmstudio`, `amazon-bedrock` và `gcp` được dành riêng; công cụ không bao giờ ghi bảng cho các id này.
+Khi ở **chế độ tài khoản ChatGPT**:
+
+Dòng `model_provider` ở cấp cao nhất sẽ không có (hoặc được hoàn trả về cài đặt cá nhân của bạn), trong khi phần cấu hình `[model_providers.lunovant]` vẫn được giữ lại:
+
+```toml
+model = "gpt-6.1-sol"
+
+[model_providers.lunovant]
+name = "Lunovant"
+base_url = "https://api.lunovant.tech/v1"
+wire_api = "responses"
+experimental_bearer_token = "sk-…"
+```
+
+### File profile (`lunovant.config.toml`)
+
+Bên cạnh `config.toml`, Codex Setup Manager còn tạo file `$CODEX_HOME/lunovant.config.toml` để lệnh `codex -p lunovant` luôn luôn hoạt động trong cả 2 chế độ:
+
+```toml
+# Managed by Codex Setup Manager: use with  codex -p lunovant
+model_provider = "lunovant"
+model = "gpt-6.1-sol"
+```
+
+> **Lưu ý về dòng `profile = "..."` cũ**: Các phiên bản Codex mới sẽ từ chối khởi động nếu trong `config.toml` còn dòng `profile = "..."` ở cấp cao nhất. Codex Setup Manager sẽ tự động phát hiện và xoá bỏ thiết lập `profile = "..."` cũ này để Codex khởi động bình thường, đồng thời vẫn giữ nguyên các bảng `[profiles.*]` (Codex bản mới sẽ tự động bỏ qua chúng).
+
+Các file cấu hình nằm ở `~/.codex/` (trên Windows là `%USERPROFILE%\.codex\`), hoặc trong thư mục `CODEX_HOME` nếu bạn có đặt. Trên macOS và Linux, file `config.toml` được tạo với quyền `0600`. Các id nhà cung cấp dựng sẵn `openai`, `ollama`, `lmstudio`, `amazon-bedrock` và `gcp` được dành riêng; công cụ không bao giờ ghi bảng cho các id này.
 
 ## Sandbox trên Windows
 

@@ -53,6 +53,11 @@
           <button id="oc-go" type="button" class="primary"><span id="oc-spin" class="spinner" hidden></span><span id="oc-go-text"></span></button>
         </div>
         <p class="hint" data-i18n="g_key_hint"></p>
+        <fieldset id="oc-mode-ask" class="mode-ask" hidden>
+          <legend data-i18n="g_mode_ask_title"></legend>
+          <label class="inline"><input type="radio" name="oc-mode" value="lunovant" checked> <span data-i18n="g_mode_ask_lunovant"></span></label>
+          <label class="inline"><input type="radio" name="oc-mode" value="personal"> <span data-i18n="g_mode_ask_personal"></span></label>
+        </fieldset>
       </div>
       <div id="oc-recheck-row" class="row" hidden>
         <button id="oc-recheck" type="button" data-i18n="oc_recheck"></button>
@@ -68,6 +73,18 @@
           <span id="oc-changed" class="b-ok" hidden></span>
         </div>
       </div>
+      <div id="mode-card" class="mode-card" hidden>
+        <h3 data-i18n="g_mode_title"></h3>
+        <div class="seg" role="group">
+          <button id="mode-lunovant" type="button" aria-pressed="false" data-i18n="g_mode_lunovant"></button>
+          <button id="mode-personal" type="button" aria-pressed="false" data-i18n="g_mode_personal"></button>
+        </div>
+        <p id="mode-hint" class="hint" hidden></p>
+      </div>
+      <details id="howto" class="howto" hidden>
+        <summary data-i18n="g_howto_title"></summary>
+        <div id="howto-body"></div>
+      </details>
       <p><button id="oc-adv" type="button" class="link"></button></p>
     </section>
 

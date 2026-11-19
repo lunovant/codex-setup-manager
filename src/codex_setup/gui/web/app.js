@@ -57,6 +57,7 @@
     if (!OC.running) $("oc-go-text").textContent = t("oc_install");
     $("l-env-warn").textContent = STATUS && STATUS.is_windows ? t("env_warn_win") : t("env_warn_posix");
     renderStatus();
+    renderMode();
   }
 
   function row(dl, label, value) {
@@ -437,8 +438,11 @@
   function keyLine(info) {
     var parts = [t("oc_key_ok")];
     if (info.plan) parts.push(info.plan);
-    if (info.remaining !== null && info.remaining !== undefined) parts.push(info.remaining + "\u{1F48E}");
-    if (info.expires_at) parts.push(t("oc_expires", { date: fmtDate(info.expires_at) }));
+    if (info.remaining !== null && info.remaining !== undefined && info.remaining !== "") {
+      var n = Number(info.remaining);
+      parts.push((isNaN(n) ? info.remaining : String(Math.round(n * 100) / 100)) + "\u{1F48E}");
+    }
+    parts.push(info.expires_at ? t("oc_expires", { date: fmtDate(info.expires_at) }) : t("g_no_expiry"));
     return "✓ " + parts.join(" · ");
   }
   function modelRow(v, m) {
@@ -539,7 +543,9 @@
     say("");
     setRunning(true);
     OC.view = newView(); OC.view.checking = true; renderOC(OC.view);
-    api("one_click_start", key).then(function (res) {
+    var modeEl = document.querySelector("input[name=oc-mode]:checked");
+    var mode = (STATUS && STATUS.chatgpt_login && modeEl) ? modeEl.value : "lunovant";
+    api("one_click_start", key, mode).then(function (res) {
       if (!res.ok) { setRunning(false); say(res.busy ? t("oc_busy") : t("g_error") + ": " + (res.error || "?"), "error"); return; }
       pollOC();
     });
@@ -593,6 +599,65 @@
       lt.textContent = t("oc_last_title") + (res.when ? " " + t("oc_last_when", { when: res.when }) : "");
       lt.hidden = false;
     });
+  }
+
+  // -- mode card + how-to -------------------------------------------------------------------
+  function renderMode() {
+    var st = STATUS || {};
+    var show = !!st.lunovant_installed;
+    $("mode-card").hidden = !show;
+    $("howto").hidden = !show;
+    $("oc-mode-ask").hidden = !st.chatgpt_login;
+    if (!show) return;
+    $("mode-lunovant").setAttribute("aria-pressed", st.mode === "lunovant" ? "true" : "false");
+    $("mode-personal").setAttribute("aria-pressed", st.mode === "personal" ? "true" : "false");
+    $("mode-personal").disabled = !st.chatgpt_login;
+    var h = $("mode-hint");
+    h.textContent = st.chatgpt_login ? "" : t("g_mode_no_login");
+    h.hidden = !!st.chatgpt_login;
+    renderHowto();
+  }
+  function switchMode(mode) {
+    if (!STATUS || STATUS.mode === mode) return;
+    api("set_mode", mode, false).then(function (res) {
+      if (!res.ok) { fail(res); return; }
+      say(t("g_mode_switched"), "ok");
+      refreshStatus();
+    });
+  }
+  $("mode-lunovant").addEventListener("click", function () { switchMode("lunovant"); });
+  $("mode-personal").addEventListener("click", function () { switchMode("personal"); });
+
+  function cmdRow(text) {
+    var r = el("div", "cmd");
+    r.appendChild(el("code", null, text));
+    var b = el("button", null, t("g_copy")); b.type = "button";
+    b.addEventListener("click", function () {
+      var done = function () { b.textContent = t("g_copied"); setTimeout(function () { b.textContent = t("g_copy"); }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () {});
+      else { var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} document.body.removeChild(ta); }
+    });
+    r.appendChild(b);
+    return r;
+  }
+  function renderHowto() {
+    var box = $("howto-body"); box.textContent = "";
+    box.appendChild(el("h4", null, t("g_howto_desktop_t")));
+    box.appendChild(el("p", null, t("g_howto_desktop")));
+    box.appendChild(el("h4", null, t("g_howto_ide_t")));
+    box.appendChild(el("p", null, t("g_howto_ide")));
+    box.appendChild(el("h4", null, t("g_howto_cli_t")));
+    box.appendChild(el("p", null, t("g_howto_cli_default")));
+    box.appendChild(cmdRow("codex"));
+    box.appendChild(el("p", null, t("g_howto_cli_profile")));
+    box.appendChild(cmdRow("codex -p lunovant"));
+    box.appendChild(el("p", null, t("g_howto_cli_model")));
+    box.appendChild(cmdRow("/model"));
+    box.appendChild(el("h4", null, t("g_howto_notes_t")));
+    box.appendChild(el("p", null, "\u2022 " + t("g_howto_note_title")));
+    box.appendChild(el("p", null, "\u2022 " + t("g_howto_note_cloud")));
+    box.appendChild(el("p", null, "\u2022 " + t("g_howto_note_balance")));
+    box.appendChild(cmdRow(t("g_dashboard_url")));
   }
 
   // -- init -------------------------------------------------------------------------------
