@@ -106,16 +106,25 @@ def _detach_comments(table: Table) -> list[Any]:
     return moved
 
 
-def upsert_provider(doc: TOMLDocument, spec: ProviderSpec) -> None:
+BEARER_FIELD = "experimental_bearer_token"
+
+
+def upsert_provider(
+    doc: TOMLDocument, spec: ProviderSpec, *, bearer_token: str | None = None
+) -> None:
+    """Write a provider table. With ``bearer_token`` the key lives in the table itself
+    (``experimental_bearer_token``) and any ``env_key`` is dropped; otherwise ``env_key`` is
+    required and a stale ``experimental_bearer_token`` is removed (it would override it)."""
     _check_id(spec.id)
-    if spec.env_key is None:
-        raise ValidationError("A custom provider needs env_key")
-    values = {
-        "name": spec.name,
-        "base_url": spec.base_url,
-        "env_key": spec.env_key,
-        "wire_api": spec.wire_api,
-    }
+    values: dict[str, str] = {"name": spec.name, "base_url": spec.base_url}
+    if bearer_token:
+        values["wire_api"] = spec.wire_api
+        values[BEARER_FIELD] = bearer_token
+    else:
+        if spec.env_key is None:
+            raise ValidationError("A custom provider needs env_key")
+        values["env_key"] = spec.env_key
+        values["wire_api"] = spec.wire_api
     providers = _providers(doc)
     if providers is None:
         container = tomlkit.table(is_super_table=True)
@@ -139,6 +148,32 @@ def upsert_provider(doc: TOMLDocument, spec: ProviderSpec) -> None:
         if k in existing and existing[k] == v:
             continue  # leave untouched to keep formatting
         existing[k] = v
+    if bearer_token:
+        if "env_key" in existing:
+            del existing["env_key"]
+    elif BEARER_FIELD in existing:
+        del existing[BEARER_FIELD]
+
+
+def get_bearer(doc: TOMLDocument, provider_id: str) -> str | None:
+    providers = _providers(doc)
+    if providers is None or provider_id not in providers:
+        return None
+    value = providers[provider_id].get(BEARER_FIELD)
+    return str(value) if value is not None else None
+
+
+def set_bearer(doc: TOMLDocument, provider_id: str, token: str | None) -> None:
+    """Set (or remove with None) experimental_bearer_token of an existing provider table."""
+    providers = _providers(doc)
+    if providers is None or provider_id not in providers:
+        return
+    table = providers[provider_id]
+    if token is None:
+        if BEARER_FIELD in table:
+            del table[BEARER_FIELD]
+    elif table.get(BEARER_FIELD) != token:
+        table[BEARER_FIELD] = token
 
 
 PROVIDER_FIELDS = ("name", "base_url", "env_key", "wire_api")
@@ -264,6 +299,9 @@ def set_windows_sandbox(
 
 
 __all__ = [
+    "BEARER_FIELD",
+    "get_bearer",
+    "set_bearer",
     "RESERVED_PROVIDER_IDS",
     "ConfigStatus",
     "PROVIDER_FIELDS",

@@ -10,12 +10,16 @@ import os
 import subprocess
 import sys
 import threading
+import webbrowser
 from collections.abc import Callable
 from typing import Any
 
 from codex_setup import __version__
 from codex_setup.app import SetupService
 from codex_setup.core.config_store import SaveResult
+from codex_setup.core import codex_config
+from codex_setup.core.state import load_state, save_state
+from codex_setup.diagnostics import model_probe
 from codex_setup.core.errors import CodexSetupError, ValidationError
 from codex_setup.diagnostics.api_test import Outcome
 from codex_setup.gui import strings as gui_strings
@@ -25,6 +29,7 @@ from codex_setup.security.redact import redact, redact_config_text
 from codex_setup.ui import i18n
 from codex_setup.ui.i18n import tr_check, tr_step
 
+CLAUDE_URL = "https://ai.lunovant.tech"
 _LANGS = ("en", "vi")
 _BACKENDS = ("auto", "keyring", "file", "session")
 _PROBLEM_KEYS = {
@@ -44,6 +49,10 @@ _PROBLEM_KEYS = {
 }
 
 
+def _norm_url(url: Any) -> str:
+    return str(url or "").strip().rstrip("/")
+
+
 def _lang_ok(lang: str | None) -> str:
     return lang if lang in _LANGS else "en"
 
@@ -54,6 +63,8 @@ class GuiApi:
         self._lang = _lang_ok(lang or i18n.default_lang())
         self._seen: list[str] = []  # secrets typed in this process, for redaction only
         self._lock = threading.Lock()
+        self._oc_lock = threading.Lock()  # guards the one-click run state below
+        self._oc: dict[str, Any] = {"running": False, "steps": [], "result": None, "run": 0}
         i18n.set_lang(self._lang)
 
     # -- plumbing ----------------------------------------------------------
@@ -306,6 +317,151 @@ class GuiApi:
 
         return self._guard(run)
 
+    # -- one-click setup ---------------------------------------------------
+    def _scrub(self, obj: Any) -> Any:
+        """Recursively redact typed secrets from anything sent to the page."""
+        if isinstance(obj, str):
+            return redact(obj, self._seen)
+        if isinstance(obj, list):
+            return [self._scrub(x) for x in obj]
+        if isinstance(obj, dict):
+            return {str(k): self._scrub(v) for k, v in obj.items()}
+        return obj
+
+    def one_click_start(self, key: str | None = None) -> dict[str, Any]:
+        key = (key or "").strip()
+        if key:
+            self._seen.append(key)
+        with self._oc_lock:
+            if self._oc["running"]:
+                return {"ok": False, "error": "busy", "busy": True}
+            # ctx (key + endpoint of this run) stays in backend memory for re-probes; never sent out
+            self._oc = {"running": True, "steps": [], "result": None, "run": self._oc["run"] + 1,
+                        "ctx": {"key": key, "url": LUNOVANT.base_url}}
+            run = self._oc["run"]
+
+        def progress(step: str, detail: dict[str, Any]) -> None:
+            with self._oc_lock:
+                if self._oc["run"] == run:
+                    self._oc["steps"].append({"step": step, "detail": self._scrub(detail)})
+
+        def work() -> None:
+            try:
+                with self._lock:  # same lock as every other config/state-changing API call
+                    res = self._svc.one_click_setup(key, None, progress)
+                result: dict[str, Any] = {
+                    "ok": bool(res.ok),
+                    "code": res.code,
+                    "message": res.message,
+                    "key_info": res.key_info,
+                    "models": res.models,
+                    "default_model": res.default_model,
+                    "has_backup": bool(res.backup_path),
+                }
+            except Exception as exc:  # never leak raw tracebacks or secrets
+                msg = redact(f"{exc.__class__.__name__}: {exc}", self._seen)[:300]
+                result = {"ok": False, "code": "error", "message": msg, "key_info": None,
+                          "models": [], "default_model": None, "has_backup": False}
+            with self._oc_lock:
+                if self._oc["run"] == run:
+                    self._oc["result"] = self._scrub(result)
+                    self._oc["running"] = False
+
+        threading.Thread(target=work, daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def one_click_poll(self) -> dict[str, Any]:
+        with self._oc_lock:
+            return {
+                "ok": True,
+                "running": bool(self._oc["running"]),
+                "steps": list(self._oc["steps"]),
+                "result": self._oc["result"],
+            }
+
+    def one_click_last(self) -> dict[str, Any]:
+        """Last saved one-click result, only while its bearer provider is still active."""
+
+        def run() -> dict[str, Any]:
+            state = load_state(self._svc._env)
+            saved = state.one_click
+            if not saved:
+                return {"has_last": False}
+            active = self._svc._active()
+            if not (active.table or {}).get(codex_config.BEARER_FIELD):
+                return {"has_last": False}
+            if _norm_url(saved.get("base_url")) != _norm_url(active.base_url):
+                return {"has_last": False}  # config was changed since: the saved result is stale
+            return self._scrub(
+                {
+                    "has_last": True,
+                    "when": saved.get("when"),
+                    "key_info": saved.get("key_info"),
+                    "models": saved.get("models") or [],
+                    "results": saved.get("results") or [],
+                    "default_model": saved.get("default_model"),
+                    "current_model": active.model,
+                }
+            )
+
+        return self._guard(run)
+
+    def set_default_model(self, model: str) -> dict[str, Any]:
+        return self._guard(lambda: self._diff(self._svc.set_default_model(model)))
+
+    def reprobe_model(self, model: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            model_ = (model or "").strip()
+            if not model_:
+                raise ValidationError("Model name is empty.")
+            svc = self._svc
+            with self._oc_lock:
+                if self._oc["running"]:
+                    raise CodexSetupError("A setup is already running.")
+                ctx = self._oc.get("ctx")
+                oc_result = self._oc.get("result")
+            active = svc._active()
+            bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
+            persist = False
+            if ctx and oc_result is not None:
+                # Re-probe the run that is on screen with that run's own key and endpoint.
+                key, url = str(ctx["key"]), str(ctx["url"])
+                persist = bool(
+                    oc_result.get("ok") and bearer == key
+                    and _norm_url(active.base_url) == _norm_url(url)
+                )
+            else:
+                # Result restored from disk: only valid for the still-active provider/endpoint.
+                saved0 = load_state(svc._env).one_click or {}
+                if not bearer or _norm_url(saved0.get("base_url")) != _norm_url(active.base_url):
+                    raise CodexSetupError("The saved setup result is out of date. Run setup again.")
+                key, url, persist = str(bearer), str(active.base_url), True
+            self._seen.append(key)
+            res = model_probe.probe_models(url, key, [model_])[0]
+            if persist:
+                state = load_state(svc._env)  # fresh: never write back a stale snapshot
+                saved = state.one_click
+                if saved is not None and _norm_url(saved.get("base_url")) == _norm_url(url):
+                    rows = [r for r in saved.get("results", []) if isinstance(r, dict)]
+                    if any(r.get("model") == model_ for r in rows):
+                        rows = [res if r.get("model") == model_ else r for r in rows]
+                    else:
+                        rows.append(res)
+                    saved["results"] = rows
+                    save_state(state, svc._env)
+            return {"result": self._scrub(res)}
+
+        return self._guard(run)
+
+    def open_url(self, url: str) -> dict[str, Any]:
+        if url != CLAUDE_URL:
+            return {"ok": False, "error": "URL not allowed"}
+        try:
+            webbrowser.open(url)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
+        return {"ok": True}
+
     # -- launch / env ------------------------------------------------------
     def launch(self, target: str = "cli") -> dict[str, Any]:
         def run() -> dict[str, Any]:
@@ -316,15 +472,24 @@ class GuiApi:
                 raise ValidationError(f"Unknown launch target: {target!r}")
             svc = self._svc
             if svc.platform.system == "windows":
-                # Own console window; the key goes through the child's environment only.
+                # Own console window. A bearer-token provider needs no env var at all; an
+                # env_key provider gets the key through the child's environment only.
                 active = svc._active()
-                key = svc.get_key(active.env_key) if active.env_key else None
-                if not active.env_key or not key:
-                    raise CodexSetupError("No API key found for the active provider.")
+                table = active.table or {}
+                bearer = table.get(codex_config.BEARER_FIELD)
                 if not svc.install.cli_path:
                     raise CodexSetupError("Codex CLI was not found on PATH.")
-                self._seen.append(key)
                 flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+                if bearer and not table.get("env_key"):
+                    self._seen.append(str(bearer))
+                    subprocess.Popen(  # noqa: S603
+                        [svc.install.cli_path], env=dict(os.environ), creationflags=flags
+                    )
+                    return {"started": True}
+                key = (svc.get_key(active.env_key) if active.env_key else None) or bearer
+                if not active.env_key or not key:
+                    raise CodexSetupError("No API key found for the active provider.")
+                self._seen.append(key)
                 subprocess.Popen(  # noqa: S603
                     [svc.install.cli_path],
                     env=launcher.build_env(os.environ, active.env_key, key),

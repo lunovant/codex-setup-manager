@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -37,6 +38,7 @@ from codex_setup.core.state import (
 )
 from codex_setup.diagnostics import knowledge
 from codex_setup.diagnostics.api_test import ApiTestReport, run_api_test
+from codex_setup.diagnostics import model_probe
 from codex_setup.diagnostics.checks import CheckResult, DiagnosticsContext, run_checks
 from codex_setup.platforms import shellrc, windows
 from codex_setup.platforms.base import (
@@ -53,6 +55,7 @@ from codex_setup.providers.catalog import (
     ProviderSpec,
     custom_provider,
     normalize_base_url,
+    suggest_v1,
     validate_model_name,
 )
 from codex_setup.security import launcher
@@ -77,6 +80,26 @@ def clean_key(key: str | None) -> str | None:
     if any(c in value for c in "\r\n\x00"):
         raise ValidationError("API key must be a single line")
     return value
+
+
+_INVISIBLE = re.compile(r"[\s\u200b\u200c\u200d\u2060\ufeff]+")
+
+
+def normalize_key(key: str | None) -> str:
+    """Drop every whitespace / zero-width character (pasted keys often carry them)."""
+    return _INVISIBLE.sub("", key or "")
+
+
+@dataclass
+class OneClickResult:
+    ok: bool
+    code: str  # "ok" | key_invalid | key_expired | not_codex_key | no_model_works | key_empty | network
+    message: str
+    key_info: dict[str, Any] = field(default_factory=dict)
+    models: list[dict[str, Any]] = field(default_factory=list)
+    default_model: str | None = None
+    config_path: Path | None = None
+    backup_path: Path | None = None
 
 
 @dataclass
@@ -197,10 +220,16 @@ class SetupService:
         if env_key not in keys:
             keys.append(env_key)
 
-    def _upsert(self, doc: Any, spec: ProviderSpec, own: ConfigOwnership) -> None:
+    def _upsert(
+        self, doc: Any, spec: ProviderSpec, own: ConfigOwnership, bearer_token: str | None = None
+    ) -> None:
         """Write a provider table, recording ownership / the values we overwrite (once)."""
         before = codex_config.provider_fields(doc, spec.id)
-        codex_config.upsert_provider(doc, spec)
+        had_token = codex_config.get_bearer(doc, spec.id) is not None
+        codex_config.upsert_provider(doc, spec, bearer_token=bearer_token)
+        if bearer_token and spec.id not in own.managed_provider_ids and before is not None:
+            rec = own.bearer_tokens.setdefault(spec.id, {"prev": had_token})
+            rec["sha"] = self._sha(bearer_token)
         if before is None:
             if spec.id not in own.managed_provider_ids:
                 own.managed_provider_ids.append(spec.id)
@@ -209,9 +238,10 @@ class SetupService:
             own.written[spec.id] = {
                 "name": spec.name,
                 "base_url": spec.base_url,
-                "env_key": str(spec.env_key),
                 "wire_api": spec.wire_api,
             }
+            if not bearer_token:
+                own.written[spec.id]["env_key"] = str(spec.env_key)
 
     # -- helpers -----------------------------------------------------------
     def _record_original(self, own: ConfigOwnership, doc: Any) -> None:
@@ -261,6 +291,8 @@ class SetupService:
         table = st.active_provider
         env_key = (table or {}).get("env_key") or None
         base_url = (table or {}).get("base_url") or None
+        if not env_key and (table or {}).get(codex_config.BEARER_FIELD):
+            env_key = LUNOVANT.env_key  # secret-store name for the key that also sits in config
         if st.model_provider == OPENAI.id and table is None:
             env_key, base_url = OPENAI.env_key, OPENAI.base_url
         return _Active(st.model_provider, env_key, base_url, st.model, table)
@@ -358,6 +390,119 @@ class SetupService:
 
         return self._edit(mutate, "quick setup", dry_run, before_write=before_write)
 
+    # -- one-click setup ----------------------------------------------------
+    def one_click_setup(
+        self,
+        key: str,
+        base_url: str | None = None,
+        progress: Callable[[str, dict[str, Any]], None] | None = None,
+        *,
+        client: Any = None,
+    ) -> OneClickResult:
+        """Paste a key -> verify -> list/probe models -> write config. Writes nothing on failure."""
+
+        def note(step: str, **detail: Any) -> None:
+            if progress is not None:
+                try:
+                    progress(step, detail)
+                except Exception:
+                    pass
+
+        def stop(code: str, message: str, **kw: Any) -> OneClickResult:
+            note("done", ok=False, code=code, message=message)
+            return OneClickResult(False, code, message, **kw)
+
+        key = normalize_key(key)
+        if not key:
+            return stop("key_empty", "Chưa nhập key.")
+        _check_ascii = key.isascii() and key.isprintable()
+        if not _check_ascii:
+            return stop("key_invalid", "Key chứa ký tự lạ. Hãy copy lại key.")
+        url = suggest_v1(base_url) if base_url else LUNOVANT.base_url
+        http = {"client": client} if client is not None else {}
+
+        note("check_key")
+        info = model_probe.check_key(url, key, **http)
+        if info.get("error"):
+            return stop("network", "Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.",
+                        key_info=info)
+        if not info["valid"]:
+            return stop("key_invalid", "Key không hợp lệ.", key_info=info)
+        if info["expired"]:
+            when = info.get("expires_at") or "?"
+            return stop("key_expired", f"Key đã hết hạn (hạn: {when}).", key_info=info)
+        note("check_key", **info)
+
+        note("fetch_models")
+        fetched = model_probe.fetch_models(url, key, **http)
+        note("fetch_models", models=fetched)
+        if not fetched or not any(m.startswith("gpt-") for m in fetched):
+            return stop(
+                "not_codex_key",
+                "Key này thuộc dòng khác (ví dụ Claude), không dùng được cho Codex. "
+                "Hãy dùng trình cài đặt Claude Code trên website.",
+                key_info=info,
+            )
+
+        results = model_probe.probe_models(
+            url, key, fetched, **http,
+            on_result=lambda r: note(f"probe:{r['model']}", **r),
+        )
+        passing = [r["model"] for r in results if r["ok"]]
+        if not passing:
+            return stop("no_model_works", "Không model nào chạy được với key này.",
+                        key_info=info, models=results)
+        default = DEFAULT_MODEL if DEFAULT_MODEL in passing else passing[0]
+
+        note("write_config", model=default)
+        spec = replace(LUNOVANT, base_url=url) if url != LUNOVANT.base_url else LUNOVANT
+        env_key = spec.env_key or ""
+        stored = False
+        try:
+            store = self.secret_store("auto")
+            self._store_call(store.set, env_key, key)
+            stored = True
+        except CodexSetupError:
+            store = None  # best effort: the key is also in config.toml
+
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            self._upsert(doc, spec, own, bearer_token=key)
+            codex_config.set_active(doc, spec.id, default)
+            if self.sandbox_applicable():
+                st = codex_config.get_status(doc)
+                if st.windows_sandbox is None:
+                    orig = own.original_top_level
+                    if orig is not None and "windows_sandbox" not in orig:
+                        orig["windows_sandbox"] = None
+                    codex_config.set_windows_sandbox(doc, "unelevated")
+            prev = state.profiles.get(spec.id)
+            custom = list(prev.models) if prev else []
+            state.profiles[spec.id] = Profile(spec.id, spec, default, custom, bearer=True)
+            state.active_profile = spec.id
+            if stored and store is not None:
+                state.secret_backend = store.backend_name
+                self._note_credential(own, store.backend_name, env_key)
+            state.one_click = {
+                "when": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "base_url": url,
+                "models": list(fetched),
+                "results": results,
+                "key_info": info,
+                "default_model": default,
+            }
+
+        saved = self._edit(mutate, "one-click setup", False)
+        path = self.config_path
+        note("done", ok=True, code="ok", default_model=default)
+        return OneClickResult(
+            True, "ok", f"Đã cài xong. Model mặc định: {default}.", info, results, default,
+            path, saved.backup,
+        )
+
+    def set_default_model(self, model: str, dry_run: bool = False) -> SaveResult:
+        """Change only the top-level ``model``."""
+        return self.change_model(model, dry_run)
+
     def change_model(self, model: str, dry_run: bool = False) -> SaveResult:
         model = validate_model_name(model)
 
@@ -379,6 +524,9 @@ class SetupService:
         key = clean_key(api_key)
         if key and delete_key:
             raise ValidationError("Choose either a new key or --delete-key, not both")
+        active = self._active()
+        if (active.table or {}).get(codex_config.BEARER_FIELD) and (key or delete_key or base_url):
+            return self._set_api_bearer(active, base_url, key, delete_key, dry_run)
         if base_url is None:
             result = SaveResult(False, "", None, dry_run)
             if not (key or delete_key):
@@ -429,6 +577,42 @@ class SetupService:
 
         return self._edit(mutate, "change api url", dry_run, before_write=before_write)
 
+    def _set_api_bearer(
+        self, active: _Active, base_url: str | None, key: str | None, delete_key: bool,
+        dry_run: bool,
+    ) -> SaveResult:
+        """set_api for a provider that keeps its key in config.toml (experimental_bearer_token)."""
+        url = normalize_base_url(base_url) if base_url else None
+        env_key = active.env_key or LUNOVANT.env_key or ""
+        pid = active.provider_id or ""
+
+        def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
+            table = codex_config.get_status(doc).active_provider or {}
+            token = key or (None if delete_key else codex_config.get_bearer(doc, pid))
+            if token:
+                spec = ProviderSpec(
+                    pid, str(table.get("name", pid)), url or str(table.get("base_url", "")),
+                    env_key, str(table.get("wire_api", "responses")),
+                )
+                self._upsert(doc, spec, own, bearer_token=token)
+                prof = state.profiles.get(pid)
+                if prof is not None and url:
+                    prof.provider = replace(prof.provider, base_url=url)
+            else:
+                codex_config.set_bearer(doc, pid, None)
+            if key:
+                backend = self.secret_store().backend_name
+                self._note_credential(own, backend, env_key)
+                state.secret_backend = backend
+
+        def before_write() -> None:
+            if key:
+                self._store_call(self.secret_store().set, env_key, key)
+            elif delete_key:
+                self._store_call(self.secret_store().delete, env_key)
+
+        return self._edit(mutate, "change api (bearer)", dry_run, before_write=before_write)
+
     def _require_env_key(self) -> str:
         active = self._active()
         if not active.env_key:
@@ -438,9 +622,10 @@ class SetupService:
     # -- test --------------------------------------------------------------
     def test(self, model: str | None = None) -> ApiTestReport:
         active = self._active()
-        if not active.base_url or not active.env_key:
+        bearer = (active.table or {}).get(codex_config.BEARER_FIELD)
+        if not active.base_url or not (active.env_key or bearer):
             raise CodexSetupError("No active provider to test. Run `codex-setup setup`.")
-        key = self.get_key(active.env_key)
+        key = (self.get_key(active.env_key) if active.env_key else None) or bearer
         if not key:
             raise CodexSetupError(f"No API key found for {active.env_key}. Run `codex-setup api --key-stdin`.")
         used = validate_model_name(model) if model else (active.model or DEFAULT_MODEL)
@@ -547,7 +732,12 @@ class SetupService:
 
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
             if not spec.builtin:
-                self._upsert(doc, spec, own)
+                token = None
+                if profile.bearer:
+                    token = codex_config.get_bearer(doc, spec.id) or self.get_key(spec.env_key or "")
+                    if not token:
+                        raise CodexSetupError("No API key stored for this profile. Run one-click setup again.")
+                self._upsert(doc, spec, own, bearer_token=token)
             codex_config.set_active(doc, spec.id, profile.model)
             state.active_profile = name
 
@@ -575,7 +765,11 @@ class SetupService:
         prof = state.profiles.get(state.active_profile or "")
         names: list[str] = []
         if prof is None or prof.provider.id == LUNOVANT.id:
-            names.extend(LUNOVANT_MODELS)
+            saved = state.one_click or {}
+            working = [r["model"] for r in saved.get("results", [])
+                       if isinstance(r, dict) and r.get("ok") and r.get("model")]
+            listed = [m for m in saved.get("models", []) if isinstance(m, str)]
+            names.extend(working or listed or LUNOVANT_MODELS)
         if prof is not None:
             names.extend(prof.models)
         return list(dict.fromkeys(names))
@@ -621,7 +815,7 @@ class SetupService:
         active = self._active()
         if not active.env_key:
             raise CodexSetupError("No active provider. Run `codex-setup setup`.")
-        key = self.get_key(active.env_key)
+        key = self.get_key(active.env_key) or (active.table or {}).get(codex_config.BEARER_FIELD)
         if not key:
             raise CodexSetupError(f"No API key found for {active.env_key}.")
         if target == "cli":
@@ -756,6 +950,7 @@ class SetupService:
                 )
                 for name in skipped:
                     notes.append(("un_field_changed", {"provider": pid, "field": name}))
+            self._restore_bearer(doc, own, notes)
             orig = own.original_top_level
             if orig is not None:
                 codex_config.restore_top_level(doc, orig.get("model"), orig.get("model_provider"))
@@ -774,6 +969,7 @@ class SetupService:
             own.original_snapshot = None
             own.overwritten = {}
             own.written = {}
+            own.bearer_tokens = {}
             state.active_profile = None
             for ks in own.credentials.values():
                 env_keys.extend(ks)
@@ -787,6 +983,36 @@ class SetupService:
             else:
                 result.notes.extend(self._delete_credentials(keys))
         return result
+
+    def _restore_bearer(
+        self, doc: Any, own: ConfigOwnership, notes: list[tuple[str, dict[str, str]]]
+    ) -> None:
+        """Undo experimental_bearer_token changes: drop ours, bring back a previous one."""
+        for pid, rec in own.bearer_tokens.items():
+            current = codex_config.get_bearer(doc, pid)
+            if current is None:
+                continue
+            if self._sha(current) != rec.get("sha"):
+                notes.append(("un_field_changed", {"provider": pid, "field": codex_config.BEARER_FIELD}))
+                continue
+            previous = self._snapshot_bearer(own, pid) if rec.get("prev") else None
+            if rec.get("prev") and previous is None:
+                notes.append(("un_field_changed", {"provider": pid, "field": codex_config.BEARER_FIELD}))
+                continue
+            codex_config.set_bearer(doc, pid, previous)
+
+    @staticmethod
+    def _snapshot_bearer(own: ConfigOwnership, pid: str) -> str | None:
+        import tomllib
+
+        if not own.original_snapshot:
+            return None
+        try:
+            data = tomllib.loads(Path(own.original_snapshot).read_text(encoding="utf-8"))
+            value = data["model_providers"][pid][codex_config.BEARER_FIELD]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        return value if isinstance(value, str) else None
 
     def _delete_credentials(self, keys: list[str]) -> list[tuple[str, dict[str, str]]]:
         state = load_state(self._env)

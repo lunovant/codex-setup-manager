@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -47,7 +48,15 @@ def create_backup(path: Path, reason: str = "", env: Mapping[str, str] | None = 
     while dest.exists():  # extremely unlikely, keep ids unique anyway
         dest = directory / f"{stem}-{n}.toml"
         n += 1
-    shutil.copy2(path, dest)
+    if os.name == "posix":
+        # the config may hold experimental_bearer_token: never world-readable, even briefly
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as out:
+            out.write(Path(path).read_bytes())
+        shutil.copystat(path, dest)
+        os.chmod(dest, 0o600)
+    else:
+        shutil.copy2(path, dest)
     meta = {
         "source": str(path),
         "created": now.astimezone().isoformat(timespec="seconds"),

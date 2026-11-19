@@ -3,7 +3,8 @@
   var S = {};            // strings
   var STATUS = null;
   var lang = "en";
-  var pending = {};      // tab -> pending sandbox mode / backup id
+  var pending = {};
+  var OC = { running: false, view: null, timer: null };      // tab -> pending sandbox mode / backup id
 
   function $(id) { return document.getElementById(id); }
   function t(key, params) {
@@ -50,6 +51,10 @@
     document.querySelectorAll("[data-i18n]").forEach(function (el) {
       el.textContent = t(el.getAttribute("data-i18n"));
     });
+    $("nav-adv").textContent = t("g_nav_advanced");
+    $("oc-adv").textContent = "\u25B8 " + t("g_nav_advanced");
+    $("oc-eye").textContent = t($("oc-key").type === "password" ? "oc_show" : "oc_hide");
+    if (!OC.running) $("oc-go-text").textContent = t("oc_install");
     $("l-env-warn").textContent = STATUS && STATUS.is_windows ? t("env_warn_win") : t("env_warn_posix");
     renderStatus();
   }
@@ -74,7 +79,7 @@
     row(dl, t("hdr_desktop"), desk);
     row(dl, t("hdr_provider"), (s.provider || t("none")) + " / " + (s.model || t("none")));
     row(dl, t("hdr_config"), cfg + (s.config.error ? " - " + s.config.error : ""));
-    row(dl, t("hdr_key"), s.masked_key + " [" + (s.secret_backend || t("none")) + "]");
+    row(dl, t("hdr_key"), s.masked_key === "(not set)" ? t("none") : s.masked_key + " [" + (s.secret_backend || t("none")) + "]");
     row(dl, t("hdr_test"), lt);
   }
 
@@ -105,7 +110,12 @@
   }
 
   // -- tabs ------------------------------------------------------------------
+  function setAdvanced(open) {
+    $("nav-adv-group").hidden = !open;
+    $("nav-adv").setAttribute("aria-expanded", open ? "true" : "false");
+  }
   function showTab(name) {
+    if (name !== "oneclick") setAdvanced(true);
     document.querySelectorAll("#nav [role=tab]").forEach(function (b) {
       b.setAttribute("aria-selected", b.getAttribute("data-tab") === name ? "true" : "false");
     });
@@ -365,6 +375,226 @@
     });
   });
 
+  // -- one-click setup ---------------------------------------------------------------------
+  function fmtDate(iso) {
+    if (!iso) return "?";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return p(d.getDate()) + "/" + p(d.getMonth() + 1) + "/" + d.getFullYear();
+  }
+  function newView() {
+    return { keyInfo: null, models: null, probes: {}, wrote: false, done: false, result: null,
+             checking: false, fetching: false, defaultModel: null, currentModel: null, hasBackup: false, last: false };
+  }
+  function foldStep(v, st) {
+    var step = st.step, d = st.detail || {};
+    if (step === "check_key") { if (d.valid !== undefined) v.keyInfo = d; else v.checking = true; }
+    else if (step === "fetch_models") {
+      if (d.models) { v.models = d.models; v.fetching = false;
+        d.models.forEach(function (m) { if (!v.probes[m]) v.probes[m] = { pending: true }; }); }
+      else v.fetching = true;
+    } else if (step.indexOf("probe:") === 0) v.probes[d.model || step.slice(6)] = d;
+    else if (step === "write_config") v.wrote = true;
+  }
+  function viewFromPoll(res) {
+    var v = newView();
+    (res.steps || []).forEach(function (st) { foldStep(v, st); });
+    if (res.result) {
+      v.done = true; v.result = res.result;
+      if (res.result.key_info) v.keyInfo = res.result.key_info;
+      v.defaultModel = res.result.default_model; v.hasBackup = res.result.has_backup;
+      (res.result.models || []).forEach(function (r) { v.probes[r.model] = r; });
+    }
+    return v;
+  }
+  function viewFromLast(last) {
+    var v = newView();
+    v.last = true; v.done = true; v.result = { ok: true, code: "ok" }; v.keyInfo = last.key_info;
+    v.models = last.models || [];
+    (last.results || []).forEach(function (r) { v.probes[r.model] = r; });
+    v.models.forEach(function (m) { if (!v.probes[m]) v.probes[m] = { pending: false, ok: false, error: "?" }; });
+    v.defaultModel = last.default_model; v.currentModel = last.current_model; v.wrote = true; v.hasBackup = true;
+    return v;
+  }
+  function line(kind, text) {
+    var d = el("div", "oc-line " + kind);
+    d.textContent = text;
+    return d;
+  }
+  function errText(r) {
+    var info = r.key_info || {};
+    switch (r.code) {
+      case "key_empty": return t("oc_err_key_empty");
+      case "key_invalid": return t("oc_err_key_invalid");
+      case "key_expired": return t("oc_err_key_expired", { date: fmtDate(info.expires_at) });
+      case "network": return t("oc_err_network");
+      case "not_codex_key": return t("oc_err_not_codex_key");
+      case "no_model_works": return t("oc_err_no_model_works");
+      default: return t("oc_err_generic") + (r.message ? ": " + r.message : "");
+    }
+  }
+  function keyLine(info) {
+    var parts = [t("oc_key_ok")];
+    if (info.plan) parts.push(info.plan);
+    if (info.remaining !== null && info.remaining !== undefined) parts.push(info.remaining + "\u{1F48E}");
+    if (info.expires_at) parts.push(t("oc_expires", { date: fmtDate(info.expires_at) }));
+    return "✓ " + parts.join(" · ");
+  }
+  function modelRow(v, m) {
+    var p = v.probes[m] || { pending: true };
+    var row = el("div", "oc-model " + (p.pending || p.running ? "" : (p.ok ? "ok" : "warn")));
+    var st = el("span", "st");
+    if (p.pending || p.running) { st.appendChild(el("span", "spinner")); }
+    else st.textContent = p.ok ? "✓" : "⚠";
+    row.appendChild(st);
+    row.appendChild(el("span", "name", m));
+    if (p.pending || p.running) return row;
+    if (p.ok) {
+      row.appendChild(el("span", "lat", p.latency_ms !== null && p.latency_ms !== undefined ? (p.latency_ms / 1000).toFixed(1) + "s" : ""));
+    } else {
+      row.appendChild(el("span", "lat", p.error || "?"));
+      if (!v.done) return row;  // no per-model retry while the run is still in progress
+      var b = el("button", null, t("oc_retry")); b.type = "button";
+      b.addEventListener("click", function () { reprobe(m); });
+      row.appendChild(b);
+    }
+    return row;
+  }
+  function passing(v) {
+    return (v.models || []).filter(function (m) { return v.probes[m] && v.probes[m].ok; });
+  }
+  function renderOC(v) {
+    OC.view = v;
+    var out = $("oc-out"); out.textContent = "";
+    var failed = v.done && v.result && !v.result.ok;
+    if (v.checking && !v.keyInfo && !failed) out.appendChild(line("", t("oc_checking")));
+    if (v.keyInfo && v.keyInfo.valid && !v.keyInfo.expired) out.appendChild(line("ok", keyLine(v.keyInfo)));
+    if (v.fetching && !v.models) out.appendChild(line("", t("oc_fetching")));
+    if (v.models && v.models.length) {
+      out.appendChild(line("ok", "✓ " + t("oc_models_found", { n: v.models.length })));
+      var box = el("div", "oc-models");
+      v.models.forEach(function (m) { box.appendChild(modelRow(v, m)); });
+      out.appendChild(box);
+    }
+    if (failed) {
+      var l = line("fail", "⚠ " + errText(v.result));
+      out.appendChild(l);
+      var r = el("div", "row");
+      var retry = el("button", "primary", t("oc_retry")); retry.type = "button";
+      retry.addEventListener("click", function () { if ($("oc-key").value) startOC(); else { showForm(true); $("oc-key").focus(); } });
+      r.appendChild(retry);
+      if (v.result.code === "not_codex_key") {
+        var lk = el("button", null, t("oc_open_claude")); lk.type = "button";
+        lk.addEventListener("click", function () { api("open_url", t("oc_claude_url")); });
+        r.appendChild(lk);
+      }
+      out.appendChild(r);
+    }
+    var ok = v.done && v.result && v.result.ok;
+    var want = v.currentModel || v.defaultModel;
+    var pass = passing(v);
+    var wantOk = pass.indexOf(want) >= 0;
+    if (v.wrote && ok) {
+      out.appendChild(line("ok", "\u2713 " + t(v.hasBackup ? "oc_wrote" : "oc_wrote_nobackup")));
+      if (wantOk) out.appendChild(line("ok", "\u2713 " + t("oc_ready")));
+      else out.appendChild(line("warn", "\u26A0 " + t("oc_default_broken", { model: want || "?" })));
+    }
+    $("oc-after").hidden = !ok;
+    if (ok) {
+      // Never show a replacement as if it were saved: the select mirrors the real config.
+      var sel = $("oc-default");
+      sel.textContent = "";
+      if (!wantOk) {
+        var ph = document.createElement("option");
+        ph.value = ""; ph.disabled = true; ph.textContent = t("oc_pick_model"); sel.appendChild(ph);
+      }
+      pass.forEach(function (m) { var o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o); });
+      sel.value = wantOk ? want : "";
+    }
+  }
+  function showForm(show) {
+    $("oc-form").hidden = !show;
+    $("oc-recheck-row").hidden = show || !(OC.view && OC.view.last);
+  }
+  function setRunning(on) {
+    OC.running = on;
+    $("oc-go").disabled = on; $("oc-key").disabled = on; $("oc-recheck").disabled = on;
+    $("oc-spin").hidden = !on;
+    $("oc-go-text").textContent = t(on ? "oc_running" : "oc_install");
+  }
+  function pollOC() {
+    api("one_click_poll").then(function (res) {
+      if (!res.ok) { setRunning(false); fail(res); return; }
+      renderOC(viewFromPoll(res));
+      if (res.running) { OC.timer = setTimeout(pollOC, 300); return; }
+      setRunning(false);
+      if (res.result && res.result.ok) { $("oc-key").value = ""; showForm(false); OC.view.last = false; $("oc-recheck-row").hidden = true; refreshStatus(); loadModels(); }
+      else showForm(true);
+    });
+  }
+  function startOC(keyOverride) {
+    if (OC.running) return;
+    var key = keyOverride !== undefined ? keyOverride : $("oc-key").value;
+    say("");
+    setRunning(true);
+    OC.view = newView(); OC.view.checking = true; renderOC(OC.view);
+    api("one_click_start", key).then(function (res) {
+      if (!res.ok) { setRunning(false); say(res.busy ? t("oc_busy") : t("g_error") + ": " + (res.error || "?"), "error"); return; }
+      pollOC();
+    });
+  }
+  function reprobe(m) {
+    var v = OC.view; if (!v) return;
+    v.probes[m] = { running: true }; renderOC(v);
+    api("reprobe_model", m).then(function (res) {
+      v.probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" };
+      renderOC(v);
+    });
+  }
+  $("oc-go").addEventListener("click", function () { startOC(); });
+  $("oc-key").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); startOC(); } });
+  $("oc-eye").addEventListener("click", function () {
+    var k = $("oc-key"); k.type = k.type === "password" ? "text" : "password";
+    $("oc-eye").setAttribute("aria-pressed", k.type === "text" ? "true" : "false");
+    $("oc-eye").textContent = t(k.type === "password" ? "oc_show" : "oc_hide");
+  });
+  $("oc-adv").addEventListener("click", function () { setAdvanced(true); $("nav-adv").focus(); });
+  $("oc-change").addEventListener("click", function () { showForm(true); $("oc-key").focus(); });
+  // "Check again" re-probes every listed model with the stored key (the key is never shown).
+  $("oc-recheck").addEventListener("click", function () {
+    var v = OC.view; if (!v || !v.models) return;
+    $("oc-recheck").disabled = true;
+    var chain = Promise.resolve();
+    v.models.forEach(function (m) { chain = chain.then(function () { return new Promise(function (r) { v.probes[m] = { running: true }; renderOC(v); api("reprobe_model", m).then(function (res) { v.probes[m] = res.ok ? res.result : { ok: false, error: res.error || "?" }; renderOC(v); r(); }); }); }); });
+    chain.then(function () { $("oc-recheck").disabled = false; });
+  });
+  $("oc-default").addEventListener("change", function () {
+    var ch = $("oc-changed"); ch.hidden = true;
+    api("set_default_model", $("oc-default").value).then(function (res) {
+      if (!res.ok) { fail(res); return; }
+      ch.textContent = "✓ " + t("oc_changed"); ch.hidden = false;
+      if (OC.view) OC.view.currentModel = $("oc-default").value;
+      refreshStatus();
+    });
+  });
+  $("oc-app").addEventListener("click", function () {
+    api("launch", "app").then(function (res) { res.ok ? say(t("ln_app_started"), "ok") : fail(res); });
+  });
+  $("oc-cli").addEventListener("click", function () {
+    api("launch", "cli").then(function (res) { res.ok ? say(t("g_launched"), "ok") : fail(res); });
+  });
+  function loadLast() {
+    return api("one_click_last").then(function (res) {
+      if (!res.ok || !res.has_last || OC.running) return;
+      var v = viewFromLast(res);
+      showForm(false); renderOC(v); showForm(false);
+      var lt = $("oc-last");
+      lt.textContent = t("oc_last_title") + (res.when ? " " + t("oc_last_when", { when: res.when }) : "");
+      lt.hidden = false;
+    });
+  }
+
   // -- init -------------------------------------------------------------------------------
   function setLang(l) {
     return api("strings", l).then(function (res) {
@@ -375,18 +605,19 @@
   document.querySelectorAll("#nav [role=tab]").forEach(function (b) {
     b.addEventListener("click", function () { showTab(b.getAttribute("data-tab")); });
     b.addEventListener("keydown", function (e) {
-      var tabs = Array.prototype.filter.call(document.querySelectorAll("#nav [role=tab]"), function (x) { return !x.hidden; });
+      var tabs = Array.prototype.filter.call(document.querySelectorAll("#nav [role=tab]"), function (x) { return !x.hidden && !x.closest("[hidden]"); });
       var i = tabs.indexOf(b);
       if (e.key === "ArrowDown" || e.key === "ArrowRight") { tabs[(i + 1) % tabs.length].focus(); e.preventDefault(); }
       if (e.key === "ArrowUp" || e.key === "ArrowLeft") { tabs[(i - 1 + tabs.length) % tabs.length].focus(); e.preventDefault(); }
     });
   });
+  $("nav-adv").addEventListener("click", function () { setAdvanced($("nav-adv-group").hidden); });
   $("lang").addEventListener("change", function () { setLang($("lang").value); });
   $("refresh").addEventListener("click", function () { refreshStatus(); loadModels(); });
 
   function init() {
     api("default_lang").then(function (r) { return setLang(r.lang || "en"); })
-      .then(refreshStatus).then(loadModels);
+      .then(refreshStatus).then(loadModels).then(loadLast);
   }
   if (window.pywebview && window.pywebview.api) init();
   else window.addEventListener("pywebviewready", init);

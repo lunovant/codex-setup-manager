@@ -7,9 +7,9 @@ Codex Setup Manager (`codex-setup`) giúp bạn cấu hình OpenAI Codex (bản 
 ## Công cụ này làm gì
 
 - Thêm nhà cung cấp Lunovant và model mặc định vào `$CODEX_HOME/config.toml` (giữ nguyên các cài đặt và ghi chú khác của bạn).
-- Lưu khóa API trong Keychain (macOS), Credential Manager (Windows) hoặc Secret Service (Linux). Khóa không bao giờ được ghi vào `config.toml`.
+- Cài đặt nhanh (One-click setup) cấu hình khóa API trong `config.toml` dưới dạng `experimental_bearer_token` (quyền file `0600` trên macOS/Linux) đồng thời lưu vào kho bí mật hệ điều hành (macOS Keychain, Windows Credential Manager hoặc Linux Secret Service).
 - Kiểm tra kết nối từng bước (kết nối, khóa, danh sách model, Responses API, streaming).
-- Mở Codex CLI hoặc Desktop với khóa được truyền qua biến môi trường.
+- Khởi chạy Codex CLI hoặc Desktop trực tiếp hoặc kèm khóa được truyền qua biến môi trường.
 - Sửa các lỗi sandbox thường gặp trên Windows.
 - Sao lưu cấu hình trước mỗi thay đổi, có thể khôi phục hoặc gỡ bỏ hoàn toàn.
 - Giao diện tiếng Anh và tiếng Việt (`--lang en|vi`).
@@ -31,8 +31,18 @@ Base URL: `https://api.lunovant.tech`. Endpoint API: `https://api.lunovant.tech/
 
 ## Ứng dụng Desktop
 
-Codex Setup Manager nay có cửa sổ ứng dụng (không cần dùng terminal):
+Codex Setup Manager có cửa sổ ứng dụng (không cần dùng terminal), khi mở sẽ vào thẳng màn hình **Cài đặt nhanh** (**One-click setup**):
 
+- Dán key Lunovant, rồi bấm **Cài đặt Codex** (**Set up Codex**).
+- Ứng dụng kiểm tra key (gói cước, số 💎 còn lại, ngày hết hạn).
+- Lấy danh sách các model mà key có quyền sử dụng từ máy chủ.
+- Kiểm tra từng model song song (hiển thị ✓ kèm độ trễ hoặc ⚠ kèm lý do lỗi, hỗ trợ thử lại từng model).
+- Ghi cấu hình kèm bản sao lưu tự động và chọn model mặc định (`gpt-6.1-sol` nếu chạy tốt).
+- Sau khi xong, hiển thị nút **Mở Codex Desktop** (**Open Codex Desktop**), **Mở Codex CLI** (**Open Codex CLI**) và ô chọn model mặc định.
+
+Các tab cài đặt chi tiết trước đây (Model, API & key, Kiểm tra kết nối, Windows Sandbox, Sao lưu & Khôi phục, Chẩn đoán, Mở Codex, Gỡ cài đặt) vẫn được giữ trong mục **Nâng cao** (**Advanced**).
+
+Bản tải cho các hệ điều hành:
 - **macOS**: tải `codex-setup-macos-arm64-app.zip` (Apple Silicon) hoặc `codex-setup-macos-x64-app.zip` (Intel), giải nén, kéo **Codex Setup.app** vào Applications rồi mở. Ứng dụng đã được ký và công chứng (notarize).
 - **Windows**: bấm đúp vào `codex-setup-windows-x64.exe`. Cần Microsoft Edge WebView2, đã cài sẵn trên Windows 10/11. Nếu thiếu, cài [Evergreen runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 - **Linux**: file `codex-setup-linux-x64` dùng menu văn bản (chưa có cửa sổ app: thư viện GTK chưa build được trên máy build Ubuntu 22.04). Mọi chức năng vẫn có đủ trong menu và các lệnh CLI.
@@ -90,23 +100,14 @@ chmod +x ./codex-setup-linux-x64
 
 ## Hướng dẫn Quick Setup
 
-Chạy `codex-setup` không kèm tham số để mở menu:
+Codex Setup Manager mở thẳng vào màn hình **Cài đặt nhanh** (**One-click setup**):
 
-```
-1  Quick Setup
-2  Change Model
-3  API Settings
-4  Test Connection
-5  Windows Sandbox Fix   (chỉ trên Windows)
-6  Backup & Restore
-7  Diagnostics
-8  Profiles
-9  Uninstall Configuration
-0  Exit
-L  Launch Codex (kèm khóa API)
-```
+1. **Dán key**: Dán khóa Lunovant của bạn và bấm **Cài đặt Codex** (**Set up Codex**).
+2. **Tự động kiểm tra**: Ứng dụng kiểm tra key (gói cước, số 💎 còn lại, hạn dùng), lấy danh sách model được cấp phép, và kiểm tra từng model song song (hiển thị ✓ kèm độ trễ hoặc ⚠ kèm lý do lỗi, có nút thử lại riêng cho từng model).
+3. **Ghi cấu hình**: Cấu hình được ghi an toàn kèm bản sao lưu tự động, tự động chọn `gpt-6.1-sol` làm model mặc định (hoặc model hoạt động đầu tiên).
+4. **Mở và sử dụng**: Bấm **Mở Codex Desktop** (**Open Codex Desktop**) hoặc **Mở Codex CLI** (**Open Codex CLI**) để bắt đầu ngay, hoặc chuyển đổi model mặc định từ danh sách chọn.
 
-Chọn 1 và làm theo hướng dẫn: xác nhận base URL, dán khóa API (ký tự được ẩn), chọn model, xem phần thay đổi và xác nhận. Sau đó chọn 4 để kiểm tra kết nối và L để mở Codex. Không có gì bị thay đổi cho đến khi bạn xác nhận, và công cụ luôn sao lưu trước.
+> Quy trình Cài đặt nhanh từng bước trước đây vẫn tồn tại trong mục **Nâng cao** (**Advanced**) trên giao diện đồ họa hoặc lựa chọn 1 trong menu văn bản (`codex-setup --tui`).
 
 ## Tham khảo lệnh
 
@@ -115,7 +116,8 @@ Tùy chọn chung: `--codex-home PATH`, `--lang en|vi`. Các lệnh ghi dữ li�
 | Lệnh | Công dụng |
 | --- | --- |
 | `status` | Xem cấu hình, nhà cung cấp, model, khóa và trạng thái Codex |
-| `setup [--base-url URL] [--model M] [--key-stdin] [--secret-backend auto\|keyring\|file\|session]` | Quick Setup |
+| `setup --auto [--base-url URL]` | Cài đặt nhanh tự động (đọc key từ stdin, kiểm tra model, ghi cấu hình) |
+| `setup [--base-url URL] [--model M] [--key-stdin] [--secret-backend auto\|keyring\|file\|session]` | Cài đặt nhanh (từng bước) |
 | `model [NAME]` | Xem hoặc đổi model |
 | `api [--base-url URL] [--key-stdin \| --delete-key]` | Đổi base URL hoặc khóa, hoặc xóa khóa đã lưu |
 | `test [--model M]` | Kiểm tra kết nối |
@@ -131,6 +133,9 @@ Tùy chọn chung: `--codex-home PATH`, `--lang en|vi`. Các lệnh ghi dữ li�
 Ví dụ:
 
 ```bash
+# Cài đặt nhanh qua stdin (đọc key từ stdin; không bao giờ truyền key làm tham số)
+pbpaste | codex-setup setup --auto
+
 codex-setup setup --dry-run              # xem trước thay đổi, không ghi gì
 codex-setup model gpt-6.1-terra          # đổi model
 codex-setup test                         # kiểm tra kết nối
@@ -140,22 +145,19 @@ codex-setup launch app                   # mở Codex Desktop kèm khóa (thử 
 echo "sk-..." | codex-setup api --key-stdin
 ```
 
-Hãy ưu tiên nhập khóa ở ô nhập ẩn thay vì `--key-stdin`: khóa gõ trực tiếp trên dòng lệnh có thể còn lưu trong lịch sử shell. Chỉ dùng `--key-stdin` cho tự động hóa, và lấy khóa từ nguồn được bảo vệ.
+Tuyệt đối không truyền khóa API dưới dạng tham số dòng lệnh: khóa sẽ bị lộ vào lịch sử shell và danh sách tiến trình (`ps`). Để tự động hóa, hãy truyền khóa qua stdin: `pbpaste | codex-setup setup --auto` (macOS) hoặc `Get-Clipboard | codex-setup setup --auto` (Windows PowerShell).
 
 ## Khóa API được lưu như thế nào
 
-Thứ tự lưu trữ (`--secret-backend auto`):
+Cài đặt nhanh (One-click setup) ghi trực tiếp khóa API vào `~/.codex/config.toml` (trên Windows là `%USERPROFILE%\.codex\config.toml`) dưới trường `experimental_bearer_token`. Nhờ đó, cả Codex Desktop và bất kỳ terminal mới mở nào đều dùng được ngay mà không cần cấu hình biến môi trường.
 
-1. Kho bí mật của hệ điều hành: Keychain (macOS), Credential Manager (Windows) hoặc Secret Service (Linux).
-2. Chỉ trong phiên làm việc: nếu máy không có kho bí mật, khóa chỉ nằm trong bộ nhớ đến khi chương trình thoát.
-3. File văn bản thường: chỉ khi bạn chủ động chọn `--secret-backend file`. Khóa được lưu trong `secrets.json` ở thư mục dữ liệu của ứng dụng, chỉ chủ sở hữu được đọc. File này không được mã hóa; công cụ sẽ cảnh báo bạn.
+- **Phân quyền file**: Trên macOS và Linux, file `config.toml` được ghi với quyền hạn chế nghiêm ngặt `0600` (chỉ chủ sở hữu có quyền đọc/ghi), và các bản sao lưu do công cụ tạo ra cũng giữ nguyên quyền `0600`.
+- **Kho khóa hệ điều hành**: Đồng thời, khóa cũng được lưu vào kho khóa của hệ điều hành (macOS Keychain, Windows Credential Manager hoặc Linux Secret Service) nếu khả dụng.
+- **Đánh đổi về bảo mật (tradeoff)**: Khóa được lưu dạng văn bản thường (plaintext) bên trong `config.toml`. Mặc dù đã giới hạn quyền chỉ tài khoản người dùng của bạn truy cập (mode `0600`), bất kỳ ứng dụng hoặc tập lệnh nào chạy dưới quyền người dùng của bạn đều có thể đọc được file này.
 
-Codex đọc khóa từ biến môi trường `LUNOVANT_API_KEY` (giá trị `env_key` trong `config.toml`), không đọc từ file cấu hình. Vì vậy biến này phải có trong tiến trình khởi động Codex:
+Nếu không muốn lưu khóa trong `config.toml`, mục **Nâng cao** (**Advanced**) vẫn cung cấp luồng biến môi trường (`env_key = "LUNOVANT_API_KEY"`), khi đó khóa được lưu trong kho khóa hệ điều hành và được đưa vào tiến trình qua `codex-setup launch` hoặc lưu lâu dài bằng `codex-setup env install`.
 
-- `codex-setup launch cli` / `launch app` mở Codex với biến đó chỉ trong tiến trình ấy. Không ghi gì ra đĩa.
-- `codex-setup env install` lưu khóa thành biến môi trường lâu dài (Windows: biến môi trường của người dùng; macOS/Linux: một khối đánh dấu trong file rc của shell). Cách này ghi khóa dạng văn bản thường, chỉ dùng nếu bạn chấp nhận điều đó. Dùng `codex-setup env remove` để hoàn tác.
-
-Khóa không bao giờ nằm trong `config.toml`, log hay tham số dòng lệnh.
+Khóa không bao giờ được ghi ra log hay nhận qua tham số dòng lệnh.
 
 ## config.toml sau khi cấu hình
 
@@ -166,11 +168,11 @@ model_provider = "lunovant"
 [model_providers.lunovant]
 name = "Lunovant"
 base_url = "https://api.lunovant.tech/v1"
-env_key = "LUNOVANT_API_KEY"
 wire_api = "responses"
+experimental_bearer_token = "sk-…"
 ```
 
-File nằm ở `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`), hoặc trong thư mục `CODEX_HOME` nếu bạn có đặt. Các id nhà cung cấp dựng sẵn `openai`, `ollama`, `lmstudio`, `amazon-bedrock` và `gcp` được dành riêng; công cụ không bao giờ ghi bảng cho các id này.
+File nằm ở `~/.codex/config.toml` (Windows: `%USERPROFILE%\.codex\config.toml`), hoặc trong thư mục `CODEX_HOME` nếu bạn có đặt. Trên macOS và Linux, file được tạo với quyền `0600`. Các id nhà cung cấp dựng sẵn `openai`, `ollama`, `lmstudio`, `amazon-bedrock` và `gcp` được dành riêng; công cụ không bao giờ ghi bảng cho các id này.
 
 ## Sandbox trên Windows
 
@@ -222,7 +224,7 @@ Gỡ cài đặt sẽ xóa các bảng nhà cung cấp do công cụ tạo, khô
 
 - Khóa API chỉ được gửi đến base URL đã cấu hình (mặc định `https://api.lunovant.tech`).
 - Không có telemetry, không thu thập dữ liệu sử dụng.
-- Khóa không bao giờ xuất hiện trong `config.toml`, log hay tham số dòng lệnh. Thông báo lỗi đã được che khóa.
+- Khóa không bao giờ xuất hiện trong log hay tham số dòng lệnh. Trong `config.toml`, khóa được bảo vệ bằng quyền file chỉ người dùng sở hữu (`0600`). Thông báo lỗi đều được che khóa tự động.
 
 ## Build từ mã nguồn
 

@@ -90,6 +90,7 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
                               "dgc_config_unreadable", error=str(exc)))
 
     env_key: str | None = None
+    bearer: str | None = None
     if status is not None:
         provider = status.model_provider
         if not provider:
@@ -109,7 +110,10 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
                               code="dgc_provider_ok", provider=provider))
             table = status.active_provider or {}
             env_key = table.get("env_key") or None
-            if not env_key:
+            if table.get(codex_config.BEARER_FIELD):
+                bearer = str(table[codex_config.BEARER_FIELD])
+                secrets.append(bearer)
+            if not env_key and not bearer:
                 results.append(_r("env_key", Outcome.WARN, "Provider has no env_key",
                                   f"[model_providers.{provider}] does not name an API key variable.",
                                   "Run `codex-setup setup` to set env_key.", "dgc_env_key_missing",
@@ -131,6 +135,8 @@ def run_checks(ctx: DiagnosticsContext) -> list[CheckResult]:
                               "The key is stored but this process does not export it.",
                               "Start Codex with `codex-setup launch`, or opt in to `codex-setup env install`.",
                               "dgc_env_var_unexported", env_key=env_key))
+        elif bearer:
+            pass  # the key lives in config.toml (experimental_bearer_token)
         else:
             results.append(_r("env_var", Outcome.FAIL, f"{env_key} is not set",
                               "No environment variable and no stored key.",
