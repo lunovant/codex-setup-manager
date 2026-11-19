@@ -20,6 +20,8 @@ class Profile:
     provider: ProviderSpec
     model: str
     models: list[str] = field(default_factory=list)
+    # True: the key is written to config.toml as experimental_bearer_token (no env_key)
+    bearer: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -27,6 +29,7 @@ class Profile:
             "provider": self.provider.to_dict(),
             "model": self.model,
             "models": list(self.models),
+            "bearer": self.bearer,
         }
 
     @classmethod
@@ -36,6 +39,7 @@ class Profile:
             provider=ProviderSpec.from_dict(d["provider"]),
             model=str(d["model"]),
             models=[str(m) for m in d.get("models", [])],
+            bearer=bool(d.get("bearer", False)),
         )
 
 
@@ -57,6 +61,9 @@ class ConfigOwnership:
     credentials: dict[str, list[str]] = field(default_factory=dict)
     # env_key -> persistent env install record (never holds the installed secret)
     env_installs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # provider id -> {"prev": bool (had a token before us), "sha": sha256 of the token we wrote}.
+    # Never holds the token; a previous token is recovered from the private original snapshot.
+    bearer_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
         return not (
@@ -67,6 +74,7 @@ class ConfigOwnership:
             or self.written
             or self.credentials
             or self.env_installs
+            or self.bearer_tokens
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -78,6 +86,7 @@ class ConfigOwnership:
             "written": self.written,
             "credentials": {k: list(v) for k, v in self.credentials.items()},
             "env_installs": self.env_installs,
+            "bearer_tokens": self.bearer_tokens,
         }
 
     @classmethod
@@ -107,7 +116,10 @@ class ConfigOwnership:
         installs = _expect(d.get("env_installs", {}), dict, "env_installs")
         for k, v in installs.items():
             _expect(v, dict, "env install record")
-        return cls(ids, top, snap, overwritten, written, credentials, installs)
+        bearer = _expect(d.get("bearer_tokens", {}), dict, "bearer_tokens")
+        for k, v in bearer.items():
+            _expect(v, dict, "bearer token record")
+        return cls(ids, top, snap, overwritten, written, credentials, installs, bearer)
 
 
 def _expect(value: Any, typ: type, what: str) -> Any:
@@ -135,6 +147,8 @@ class AppState:
     secret_backend: str | None = None
     last_test: dict[str, Any] | None = None
     configs: dict[str, ConfigOwnership] = field(default_factory=dict)
+    # last successful one-click setup: models, probe results, key info (never the key itself)
+    one_click: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,6 +158,7 @@ class AppState:
             "secret_backend": self.secret_backend,
             "last_test": self.last_test,
             "configs": {k: c.to_dict() for k, c in self.configs.items()},
+            "one_click": self.one_click,
         }
 
     @classmethod
@@ -160,6 +175,9 @@ class AppState:
         last = d.get("last_test")
         if last is not None:
             _expect(last, dict, "last_test")
+        one_click = d.get("one_click")
+        if one_click is not None:
+            _expect(one_click, dict, "one_click")
         raw_configs = _expect(d.get("configs", {}), dict, "configs")
         configs = {str(k): ConfigOwnership.from_dict(v) for k, v in raw_configs.items()}
         legacy = {
@@ -180,6 +198,7 @@ class AppState:
             secret_backend=backend,
             last_test=last,
             configs=configs,
+            one_click=one_click,
         )
 
 

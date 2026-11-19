@@ -53,3 +53,20 @@ pre:empty { display: none; }
 .badge { font-weight: 700; } .b-ok { color: var(--ok); } .b-warn { color: var(--warn); } .b-fail { color: var(--fail); } .b-skip { color: var(--muted); }
 .overall { font-weight: 700; }
 .issue { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.nav-group { text-align: left; background: transparent; border: 1px solid transparent; color: var(--muted); }
+.nav-group::before { content: "\25B8  "; } .nav-group[aria-expanded="true"]::before { content: "\25BE  "; }
+.nav-sub { display: flex; flex-direction: column; gap: 4px; padding-left: 10px; }
+[hidden] { display: none !important; }
+.oc-label { display: block; font-weight: 600; margin-bottom: 4px; }
+.oc-keyrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.oc-keyrow input { flex: 1 1 220px; min-width: 0; }
+button.link { background: transparent; border: none; color: var(--accent); text-decoration: underline; padding: 2px 4px; }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.oc-line { margin: 6px 0; } .oc-line.ok { color: var(--ok); } .oc-line.warn { color: var(--warn); } .oc-line.fail { color: var(--fail); }
+.oc-models { margin: 4px 0 4px 18px; }
+.oc-model { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 3px 0; }
+.oc-model .name { min-width: 150px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.oc-model.ok .st { color: var(--ok); } .oc-model.warn .st { color: var(--warn); } .oc-model .lat { color: var(--muted); }
+.oc-model button { padding: 1px 8px; font-size: 12px; }
+.oc-launch { align-items: center; margin-top: 14px; } .oc-defl { margin-left: auto; font-weight: 600; }

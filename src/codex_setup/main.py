@@ -65,6 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base-url")
     p.add_argument("--model")
     p.add_argument("--key-stdin", action="store_true", help="read the API key from stdin")
+    p.add_argument("--auto", action="store_true",
+                   help="one-click setup: key from stdin, models fetched and tested")
     p.add_argument("--secret-backend", choices=["auto", "keyring", "file", "session"], default="auto")
 
     p = add("model", "show or change the model")
@@ -227,7 +229,37 @@ def _resolve_url(raw: str | None) -> str | None:
     return url
 
 
+def _cmd_one_click(svc: SetupService, ns: argparse.Namespace) -> int:
+    if ns.dry_run:  # one-click verifies the key online and writes config, state and secrets
+        _err(t("oc_no_dry_run"))
+        return 2
+    key = _read_stdin_key()  # never from argv: it would leak into shell history and ps
+    res = svc.one_click_setup(
+        key, _resolve_url(ns.base_url), lambda step, detail: None
+    )
+    if res.key_info.get("valid"):
+        _out(t("oc_key", plan=res.key_info.get("plan") or "?",
+               remaining=res.key_info.get("remaining", "?"),
+               expires=res.key_info.get("expires_at") or "-"))
+    if res.models:
+        ok = sum(1 for m in res.models if m["ok"])
+        _out(t("oc_models", n=ok, total=len(res.models)))
+        for m in res.models:
+            mark = "OK  " if m["ok"] else "FAIL"
+            extra = f"{m['latency_ms']} ms" if m["ok"] else (m.get("error") or "")
+            _out(f"  {mark} {m['model']:<24} {extra}")
+    if not res.ok:
+        _err(t("oc_fail", code=res.code, msg=redact(res.message, _SEEN_SECRETS)))
+        return 1
+    _out(t("oc_default", model=res.default_model))
+    _out(t("oc_config", path=res.config_path))
+    _out(t("oc_ok"))
+    return 0
+
+
 def _cmd_setup(svc: SetupService, ns: argparse.Namespace) -> int:
+    if ns.auto:
+        return _cmd_one_click(svc, ns)
     key = _read_stdin_key() if ns.key_stdin else None
     url = _resolve_url(ns.base_url)
     model = ns.model or DEFAULT_MODEL

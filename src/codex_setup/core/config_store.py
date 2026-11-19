@@ -102,6 +102,8 @@ def atomic_write_text(path: Path, text: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+        if "experimental_bearer_token" in text:
+            mode = 0o600  # applied to the temp file BEFORE it replaces the target
         fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
         with os.fdopen(fd, "wb") as fh:
             fh.write(text.encode("utf-8"))

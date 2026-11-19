@@ -7,9 +7,9 @@ Codex Setup Manager (`codex-setup`) configures OpenAI Codex (CLI and Desktop app
 ## What it does
 
 - Adds a Lunovant provider and a default model to `$CODEX_HOME/config.toml` (keeps your other settings and comments).
-- Stores the API key in macOS Keychain, Windows Credential Manager or the Linux Secret Service. The key is never written to `config.toml`.
+- One-click setup configures the API key in `config.toml` as `experimental_bearer_token` (file mode `0600` on macOS/Linux) and keeps it in the OS secret store (macOS Keychain, Windows Credential Manager or Linux Secret Service).
 - Tests the connection step by step (reachability, key, model list, Responses API, streaming).
-- Launches Codex CLI or Desktop with the key injected as an environment variable.
+- Launches Codex CLI or Desktop directly or with the key injected.
 - Fixes common Windows sandbox errors.
 - Backs up the config before every change, and can restore or fully undo everything.
 - Interface in English and Vietnamese (`--lang en|vi`).
@@ -31,8 +31,18 @@ The Linux Desktop app is a preview, available for Ubuntu 24.04/26.04, Debian 13,
 
 ## Desktop app
 
-Codex Setup Manager now has a desktop window (no terminal needed):
+Codex Setup Manager provides a desktop window (no terminal needed) that opens directly onto **One-click setup** (**Cài đặt nhanh**):
 
+- Paste your Lunovant key, then click **Set up Codex** (**Cài đặt Codex**).
+- The app checks the key (validates plan, 💎 remaining, and expiration date).
+- It fetches the models your key is authorized to use from the server.
+- It tests each model in parallel (displaying ✓ with latency or ⚠ with the failure reason, with per-model retry support).
+- It writes the configuration with an automatic backup and chooses `gpt-6.1-sol` as the default model (if working).
+- Once completed, it offers buttons to **Open Codex Desktop** (**Mở Codex Desktop**) or **Open Codex CLI** (**Mở Codex CLI**), along with a default-model selector.
+
+All detailed tabs (Model, API & key, Test connection, Windows Sandbox, Backup & Restore, Diagnostics, Launch Codex, Uninstall) are preserved under **Advanced** (**Nâng cao**).
+
+Platform downloads:
 - **macOS**: download `codex-setup-macos-arm64-app.zip` (Apple Silicon) or `codex-setup-macos-x64-app.zip` (Intel), unzip it, drag **Codex Setup.app** to Applications, then open it. The app is signed and notarized.
 - **Windows**: double-click `codex-setup-windows-x64.exe`. It needs Microsoft Edge WebView2, which is preinstalled on Windows 10/11. If it is missing, install the [Evergreen runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
 - **Linux**: `codex-setup-linux-x64` uses the text menu (no desktop window yet: the GTK bindings could not be built on the Ubuntu 22.04 build runner). Every feature is available there and through the CLI commands.
@@ -90,23 +100,14 @@ For convenience, you can rename the file to `codex-setup` and put it on your `PA
 
 ## Quick Setup walkthrough
 
-Run `codex-setup` with no arguments to open the menu:
+Codex Setup Manager opens directly on **One-click setup** (**Cài đặt nhanh**):
 
-```
-1  Quick Setup
-2  Change Model
-3  API Settings
-4  Test Connection
-5  Windows Sandbox Fix   (Windows only)
-6  Backup & Restore
-7  Diagnostics
-8  Profiles
-9  Uninstall Configuration
-0  Exit
-L  Launch Codex (with key injected)
-```
+1. **Paste your key**: Enter your Lunovant key and click **Set up Codex** (**Cài đặt Codex**).
+2. **Automated verification**: The app checks your key (plan, 💎 remaining, expiry), queries the models authorized for the key, and tests each model in parallel (showing ✓ with response latency or ⚠ with the reason, with per-model retry).
+3. **Configuration**: Config is safely written with an automatic backup, setting `gpt-6.1-sol` as the default model (or the first working model).
+4. **Launch & use**: Click **Open Codex Desktop** (**Mở Codex Desktop**) or **Open Codex CLI** (**Mở Codex CLI**) to start immediately, or change the default model using the selector.
 
-Choose 1 and follow the prompts: confirm the base URL, paste your API key (input is hidden), pick a model, review the diff, and confirm. Then choose 4 to test and L to launch Codex. Nothing is changed until you confirm, and a backup is made first.
+> The classic step-by-step Quick Setup remains available under the **Advanced** (**Nâng cao**) section in the GUI and as option 1 in the text menu (`codex-setup --tui`).
 
 ## Command reference
 
@@ -115,7 +116,8 @@ Global options: `--codex-home PATH`, `--lang en|vi`. Write commands accept `--dr
 | Command | Purpose |
 | --- | --- |
 | `status` | Show config, provider, model, key and Codex status |
-| `setup [--base-url URL] [--model M] [--key-stdin] [--secret-backend auto\|keyring\|file\|session]` | Quick Setup |
+| `setup --auto [--base-url URL]` | One-click automated setup (reads key from stdin, probes models, writes config) |
+| `setup [--base-url URL] [--model M] [--key-stdin] [--secret-backend auto\|keyring\|file\|session]` | Quick Setup (step-by-step) |
 | `model [NAME]` | Show or change the model |
 | `api [--base-url URL] [--key-stdin \| --delete-key]` | Change base URL or key, or delete the stored key |
 | `test [--model M]` | Test the connection |
@@ -131,6 +133,9 @@ Global options: `--codex-home PATH`, `--lang en|vi`. Write commands accept `--dr
 Examples:
 
 ```bash
+# One-click setup via stdin (reads key from stdin; never pass the key as an argument)
+pbpaste | codex-setup setup --auto
+
 codex-setup setup --dry-run              # preview the changes, write nothing
 codex-setup model gpt-6.1-terra          # switch model
 codex-setup test                         # test the connection
@@ -140,22 +145,19 @@ codex-setup launch app                   # start Codex Desktop with the key (exp
 echo "sk-..." | codex-setup api --key-stdin
 ```
 
-Prefer the hidden prompt over `--key-stdin`: a key typed into a command line can stay in your shell history. Use `--key-stdin` only for automation, reading from a protected source.
+Never pass an API key as a command-line argument: it leaks into shell history and process lists (`ps`). For automated setup, pass the key via stdin: `pbpaste | codex-setup setup --auto` (macOS) or `Get-Clipboard | codex-setup setup --auto` (Windows PowerShell).
 
 ## How the API key is stored
 
-Storage order (`--secret-backend auto`):
+One-click setup writes the API key into `~/.codex/config.toml` (or `%USERPROFILE%\.codex\config.toml` on Windows) as `experimental_bearer_token`. This allows Codex Desktop and any new terminal session to work out-of-the-box without configuring environment variables.
 
-1. OS secret store: macOS Keychain, Windows Credential Manager, or Linux Secret Service.
-2. Session only: if no secret store is available, the key lives in memory until the program exits.
-3. Plain-text file: only if you explicitly choose `--secret-backend file`. It is saved as `secrets.json` in the app folder with owner-only permissions. This is not encrypted; the tool warns you.
+- **File permissions**: On macOS and Linux, `config.toml` is written with strict `0600` permissions (read/write by owner only), and backups created by the tool also preserve `0600` mode.
+- **OS Secret Store**: The key is also stored in the operating system's secret store (macOS Keychain, Windows Credential Manager, or Linux Secret Service) when available.
+- **Security tradeoff**: The key is stored in plaintext within `config.toml`. While restricted to your user account (mode `0600`), any application or script running under your user account can read it.
 
-Codex reads the key from the environment variable `LUNOVANT_API_KEY` (the `env_key` in `config.toml`), not from the config file. So the variable must exist in the process that starts Codex:
+If you prefer not to store the key in `config.toml`, the **Advanced** (**Nâng cao**) setup provides the environment variable workflow (`env_key = "LUNOVANT_API_KEY"`), where the key stays in the OS keychain and is injected via `codex-setup launch` or persisted with `codex-setup env install`.
 
-- `codex-setup launch cli` / `launch app` starts Codex with the variable set for that process only. Nothing is written to disk.
-- `codex-setup env install` stores the key as a persistent environment variable (Windows: user environment; macOS/Linux: a marked block in your shell rc file). This writes the key in plain text, so use it only if you accept that. `codex-setup env remove` undoes it.
-
-The key is never put in `config.toml`, logs, or command-line arguments.
+The key is never printed in logs or passed via command-line arguments.
 
 ## Resulting config.toml
 
@@ -166,11 +168,11 @@ model_provider = "lunovant"
 [model_providers.lunovant]
 name = "Lunovant"
 base_url = "https://api.lunovant.tech/v1"
-env_key = "LUNOVANT_API_KEY"
 wire_api = "responses"
+experimental_bearer_token = "sk-…"
 ```
 
-The file lives at `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows), or under `CODEX_HOME` if set. The built-in provider ids `openai`, `ollama`, `lmstudio`, `amazon-bedrock` and `gcp` are reserved; the tool never writes a table for them.
+The file lives at `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows), or under `CODEX_HOME` if set. On macOS and Linux, it is created with permission mode `0600`. The built-in provider ids `openai`, `ollama`, `lmstudio`, `amazon-bedrock` and `gcp` are reserved; the tool never writes a table for them.
 
 ## Windows sandbox
 
@@ -222,7 +224,7 @@ Uninstall removes the provider tables this tool created, restores your original 
 
 - The API key is sent only to the configured base URL (default `https://api.lunovant.tech`).
 - No telemetry and no analytics.
-- The key never appears in `config.toml`, logs, or command-line arguments. Error output is redacted.
+- The key never appears in logs or command-line arguments. In `config.toml`, it is protected by user-only file permissions (`0600`). Error output is redacted.
 
 ## Build from source
 

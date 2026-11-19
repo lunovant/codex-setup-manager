@@ -158,3 +158,90 @@ VI["g_cli_needs_terminal"] = (
     "Codex CLI cần một terminal. Hãy mở terminal và chạy `codex-setup launch`, hoặc mở GUI "
     "từ terminal."
 )
+
+EN.update(
+{
+    "g_nav_oneclick": "One-click setup",
+    "g_nav_advanced": "Advanced",
+    "oc_title": "One-click setup",
+    "oc_key_label": "Paste your Lunovant key",
+    "oc_install": "Set up Codex",
+    "oc_running": "Setting up...",
+    "oc_show": "Show",
+    "oc_hide": "Hide",
+    "oc_retry": "Retry",
+    "oc_recheck": "Check again",
+    "oc_change_key": "Change key",
+    "oc_checking": "Checking key...",
+    "oc_key_ok": "Key is valid",
+    "oc_expires": "expires {date}",
+    "oc_fetching": "Fetching model list...",
+    "oc_models_found": "Found {n} models",
+    "oc_wrote": "Configuration written (backup saved)",
+    "oc_wrote_nobackup": "Configuration written",
+    "oc_ready": "Codex Desktop / terminal works right away",
+    "oc_open_app": "Open Codex Desktop",
+    "oc_open_cli": "Open Codex CLI",
+    "oc_default_model": "Default model",
+    "oc_changed": "Changed",
+    "oc_probing": "Testing...",
+    "oc_last_title": "Last setup",
+    "oc_last_when": "at {when}",
+    "oc_err_key_empty": "Paste your key in the field above.",
+    "oc_err_key_invalid": "The key is not valid. Copy the full key again.",
+    "oc_err_key_expired": "The key has expired (expiry: {date}).",
+    "oc_err_network": "Could not reach the server. Check your internet connection and retry.",
+    "oc_err_not_codex_key": "This key is for Claude and cannot be used with Codex. Install Claude Code from the Lunovant site.",
+    "oc_open_claude": "Open the Claude Code installer page",
+    "oc_err_no_model_works": "No model works with this key.",
+    "oc_err_generic": "Setup failed",
+    "oc_busy": "A setup is already running.",
+    "oc_claude_url": "https://ai.lunovant.tech"
+}
+)
+
+VI.update(
+{
+    "g_nav_oneclick": "Cài đặt nhanh",
+    "g_nav_advanced": "Nâng cao",
+    "oc_title": "Cài đặt nhanh",
+    "oc_key_label": "Dán key Lunovant",
+    "oc_install": "Cài đặt Codex",
+    "oc_running": "Đang cài đặt...",
+    "oc_show": "Hiện",
+    "oc_hide": "Ẩn",
+    "oc_retry": "Thử lại",
+    "oc_recheck": "Kiểm tra lại",
+    "oc_change_key": "Đổi key",
+    "oc_checking": "Đang kiểm tra key...",
+    "oc_key_ok": "Key hợp lệ",
+    "oc_expires": "hết hạn {date}",
+    "oc_fetching": "Đang lấy danh sách model...",
+    "oc_models_found": "Tìm thấy {n} model",
+    "oc_wrote": "Đã ghi cấu hình (có bản sao lưu)",
+    "oc_wrote_nobackup": "Đã ghi cấu hình",
+    "oc_ready": "Codex Desktop / terminal dùng được ngay",
+    "oc_open_app": "Mở Codex Desktop",
+    "oc_open_cli": "Mở Codex CLI",
+    "oc_default_model": "Model mặc định",
+    "oc_changed": "Đã đổi",
+    "oc_probing": "Đang thử...",
+    "oc_last_title": "Lần cài đặt gần nhất",
+    "oc_last_when": "lúc {when}",
+    "oc_err_key_empty": "Hãy dán key vào ô phía trên.",
+    "oc_err_key_invalid": "Key không hợp lệ. Hãy copy lại key đầy đủ.",
+    "oc_err_key_expired": "Key đã hết hạn (hạn: {date}).",
+    "oc_err_network": "Không kết nối được máy chủ. Hãy kiểm tra mạng rồi thử lại.",
+    "oc_err_not_codex_key": "Key này dành cho Claude, không dùng được cho Codex. Hãy cài Claude Code từ trang Lunovant.",
+    "oc_open_claude": "Mở trang cài Claude Code",
+    "oc_err_no_model_works": "Không model nào chạy được với key này.",
+    "oc_err_generic": "Cài đặt thất bại",
+    "oc_busy": "Đang có một lần cài đặt chạy.",
+    "oc_claude_url": "https://ai.lunovant.tech"
+}
+)
+
+EN["oc_pick_model"] = "Pick a working model..."
+EN["oc_default_broken"] = "The default model {model} no longer works. Pick another model below."
+VI["oc_pick_model"] = "Chọn model đang chạy được..."
+VI["oc_default_broken"] = "Model mặc định {model} không còn chạy được. Hãy chọn model khác bên dưới."

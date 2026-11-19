@@ -24,7 +24,10 @@
 
 <div class="layout">
   <nav id="nav" role="tablist" aria-orientation="vertical">
-    <button role="tab" data-tab="quick" data-i18n="g_nav_quick" aria-selected="true"></button>
+    <button role="tab" data-tab="oneclick" data-i18n="g_nav_oneclick" aria-selected="true"></button>
+    <button type="button" id="nav-adv" class="nav-group" aria-expanded="false" aria-controls="nav-adv-group"></button>
+    <div id="nav-adv-group" class="nav-sub" hidden>
+    <button role="tab" data-tab="quick" data-i18n="g_nav_quick" aria-selected="false"></button>
     <button role="tab" data-tab="model" data-i18n="g_nav_model"></button>
     <button role="tab" data-tab="api" data-i18n="g_nav_api"></button>
     <button role="tab" data-tab="test" data-i18n="g_nav_test"></button>
@@ -33,12 +36,42 @@
     <button role="tab" data-tab="diag" data-i18n="g_nav_diag"></button>
     <button role="tab" data-tab="launch" data-i18n="g_nav_launch"></button>
     <button role="tab" data-tab="uninstall" data-i18n="g_nav_uninstall"></button>
+    </div>
   </nav>
 
   <main>
     <div id="message" role="status" aria-live="polite" class="message" hidden></div>
 
-    <section id="tab-quick" role="tabpanel" class="panel">
+    <section id="tab-oneclick" role="tabpanel" class="panel">
+      <h2 data-i18n="oc_title"></h2>
+      <div id="oc-last" class="hint" hidden></div>
+      <div id="oc-form">
+        <label for="oc-key" class="oc-label" data-i18n="oc_key_label"></label>
+        <div class="oc-keyrow">
+          <input id="oc-key" type="password" autocomplete="off" spellcheck="false">
+          <button id="oc-eye" type="button" aria-pressed="false"></button>
+          <button id="oc-go" type="button" class="primary"><span id="oc-spin" class="spinner" hidden></span><span id="oc-go-text"></span></button>
+        </div>
+        <p class="hint" data-i18n="g_key_hint"></p>
+      </div>
+      <div id="oc-recheck-row" class="row" hidden>
+        <button id="oc-recheck" type="button" data-i18n="oc_recheck"></button>
+        <button id="oc-change" type="button" class="link" data-i18n="oc_change_key"></button>
+      </div>
+      <div id="oc-out" aria-live="polite"></div>
+      <div id="oc-after" hidden>
+        <div class="row oc-launch">
+          <button id="oc-app" type="button" class="primary" data-i18n="oc_open_app"></button>
+          <button id="oc-cli" type="button" data-i18n="oc_open_cli"></button>
+          <label for="oc-default" class="oc-defl"><span data-i18n="oc_default_model"></span>:</label>
+          <select id="oc-default"></select>
+          <span id="oc-changed" class="b-ok" hidden></span>
+        </div>
+      </div>
+      <p><button id="oc-adv" type="button" class="link"></button></p>
+    </section>
+
+    <section id="tab-quick" role="tabpanel" class="panel" hidden>
       <h2 data-i18n="g_nav_quick"></h2>
       <div class="field"><label for="q-url" data-i18n="qs_base_url"></label>
         <input id="q-url" type="text" value="https://api.lunovant.tech/v1" autocomplete="off"></div>

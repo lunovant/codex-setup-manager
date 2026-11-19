@@ -201,3 +201,175 @@ def test_csp_allows_pywebview_bridge():
     if csp:
         script_src = re.search(r"script-src([^;]*)", csp.group(1))
         assert script_src and "'unsafe-eval'" in script_src.group(1)
+
+
+# -- one-click GUI API ----------------------------------------------------------------
+import threading as _th
+import time as _time
+
+from codex_setup.app import OneClickResult as _OCR
+
+
+def _wait_done(gui: GuiApi, timeout: float = 5.0) -> dict:
+    end = _time.time() + timeout
+    while _time.time() < end:
+        res = gui.one_click_poll()
+        if not res["running"]:
+            return res
+        _time.sleep(0.02)
+    raise AssertionError("one-click run did not finish")
+
+
+def test_one_click_start_poll_no_key_leak(gui, monkeypatch):
+    def fake(key, base_url=None, progress=None, **kw):
+        progress("check_key", {})
+        progress("check_key", {"valid": True, "plan": "P", "note": f"echo {key}"})
+        progress("fetch_models", {"models": ["gpt-6"]})
+        progress("probe:gpt-6", {"model": "gpt-6", "ok": True, "latency_ms": 1200})
+        progress("done", {"ok": True, "code": "ok"})
+        return _OCR(True, "ok", f"done {key}", {"valid": True}, [{"model": "gpt-6", "ok": True}],
+                    "gpt-6", None, None)
+
+    monkeypatch.setattr(gui._svc, "one_click_setup", fake)
+    assert gui.one_click_start(KEY)["ok"]
+    res = _wait_done(gui)
+    assert [s["step"] for s in res["steps"]][-1] == "done"
+    assert res["result"]["ok"] and res["result"]["default_model"] == "gpt-6"
+    assert KEY not in json.dumps(res)
+
+
+def test_one_click_only_one_run(gui, monkeypatch):
+    gate = _th.Event()
+
+    def slow(key, base_url=None, progress=None, **kw):
+        gate.wait(5)
+        return _OCR(False, "key_invalid", "x")
+
+    monkeypatch.setattr(gui._svc, "one_click_setup", slow)
+    assert gui.one_click_start("a")["ok"]
+    second = gui.one_click_start("b")
+    assert not second["ok"] and second["busy"]
+    assert gui.one_click_poll()["running"]
+    gate.set()
+    assert _wait_done(gui)["result"]["code"] == "key_invalid"
+    assert gui.one_click_start("c")["ok"]
+    _wait_done(gui)
+
+
+def test_one_click_exception_is_json(gui, monkeypatch):
+    def boom(key, base_url=None, progress=None, **kw):
+        raise RuntimeError(f"bad {key}")
+
+    monkeypatch.setattr(gui._svc, "one_click_setup", boom)
+    gui.one_click_start(KEY)
+    res = _wait_done(gui)
+    assert res["result"]["ok"] is False and KEY not in json.dumps(res)
+
+
+_BEARER_CFG = (
+    'model_provider = "lunovant"\nmodel = "gpt-6"\n\n[model_providers.lunovant]\n'
+    'name = "Lunovant"\nbase_url = "https://api.lunovant.tech/v1"\nwire_api = "responses"\n'
+    f'experimental_bearer_token = "{KEY}"\n'
+)
+
+
+def test_reprobe_model_updates_state(gui, monkeypatch):
+    from codex_setup.core.state import AppState, load_state, save_state
+    from codex_setup.diagnostics import model_probe
+
+    _cfg().parent.mkdir(parents=True, exist_ok=True)
+    _cfg().write_text(_BEARER_CFG, encoding="utf-8")
+    st = AppState()
+    st.one_click = {"base_url": "https://api.lunovant.tech/v1", "results": [
+        {"model": "gpt-6", "ok": False, "error": "429"}, {"model": "gpt-7", "ok": True}]}
+    save_state(st, gui._svc._env)
+    seen = {}
+
+    def fake(url, key, models, **kw):
+        seen.update(url=url, key=key, models=models)
+        return [{"model": models[0], "ok": True, "latency_ms": 5, "error": None}]
+
+    monkeypatch.setattr(model_probe, "probe_models", fake)
+    res = gui.reprobe_model("gpt-6")
+    assert res["ok"] and res["result"]["ok"]
+    assert seen == {"url": "https://api.lunovant.tech/v1", "key": KEY, "models": ["gpt-6"]}
+    saved = load_state(gui._svc._env).one_click["results"]
+    assert [r["ok"] for r in saved] == [True, True]
+    assert KEY not in json.dumps(res)
+    last = gui.one_click_last()
+    assert last["has_last"] and KEY not in json.dumps(last)
+
+
+def test_launch_windows_bearer_only(monkeypatch):
+    import subprocess as sp
+
+    gui = _make("windows")
+    gui._svc._install = CodexInstall("C:/codex.exe", "1", True, False, None, None, "n/a")
+    _cfg().parent.mkdir(parents=True, exist_ok=True)
+    _cfg().write_text(_BEARER_CFG, encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(sp, "Popen", lambda *a, **k: calls.append((a, k)))
+    res = gui.launch("cli")
+    assert res["ok"], res
+    assert calls and calls[0][0][0] == ["C:/codex.exe"]
+    assert KEY not in json.dumps(res)
+
+
+def test_open_url_whitelist(gui):
+    assert not gui.open_url("https://evil.example")["ok"]
+
+
+def test_reprobe_stale_state_never_sends_key_to_old_endpoint(gui, monkeypatch):
+    from codex_setup.core.state import AppState, save_state
+    from codex_setup.diagnostics import model_probe
+
+    _cfg().parent.mkdir(parents=True, exist_ok=True)
+    _cfg().write_text(_BEARER_CFG, encoding="utf-8")
+    st = AppState()
+    st.one_click = {"base_url": "https://old.example/v1", "results": [{"model": "gpt-6", "ok": True}]}
+    save_state(st, gui._svc._env)
+    calls = []
+    monkeypatch.setattr(model_probe, "probe_models", lambda *a, **k: calls.append(a) or [])
+    assert gui.one_click_last()["has_last"] is False
+    res = gui.reprobe_model("gpt-6")
+    assert not res["ok"] and calls == []
+
+
+def test_reprobe_failed_run_uses_run_context_and_persists_nothing(gui, monkeypatch):
+    from codex_setup.core.state import load_state
+    from codex_setup.diagnostics import model_probe
+
+    monkeypatch.setattr(gui._svc, "one_click_setup",
+                        lambda key, base_url=None, progress=None, **kw: _OCR(False, "no_model_works", "x"))
+    seen = {}
+
+    def fake(url, key, models, **kw):
+        seen.update(url=url, key=key)
+        return [{"model": models[0], "ok": True, "latency_ms": 1, "error": None}]
+
+    monkeypatch.setattr(model_probe, "probe_models", fake)
+    gui.one_click_start(KEY)
+    _wait_done(gui)
+    res = gui.reprobe_model("gpt-6")  # fresh machine: no config at all
+    assert res["ok"] and seen["key"] == KEY and seen["url"] == "https://api.lunovant.tech/v1"
+    assert load_state(gui._svc._env).one_click is None
+    assert KEY not in json.dumps(res)
+
+
+def test_one_click_holds_shared_lock(gui, monkeypatch):
+    gate, entered = _th.Event(), _th.Event()
+
+    def slow(key, base_url=None, progress=None, **kw):
+        entered.set()
+        gate.wait(5)
+        return _OCR(False, "key_invalid", "x")
+
+    monkeypatch.setattr(gui._svc, "one_click_setup", slow)
+    gui.one_click_start("a")
+    assert entered.wait(5)
+    done = _th.Event()
+    _th.Thread(target=lambda: (gui.backups(), done.set()), daemon=True).start()
+    assert not done.wait(0.3)  # config-touching APIs wait for the worker's lock
+    gate.set()
+    assert done.wait(5)
+    _wait_done(gui)
