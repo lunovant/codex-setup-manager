@@ -803,30 +803,59 @@
   function renderHowto() {
     var box = $("howto-body"); box.textContent = "";
     var st = STATUS || {};
+    var mac = !!(st.os && st.os.system === "macos");
+    // Shortcuts in the strings are written for macOS; adapt them for Windows/Linux.
+    function kb(s) {
+      if (mac) return s;
+      return s.replace(/⌥⌘B/g, "Ctrl+Alt+B").replace(/⌘⇧P/g, "Ctrl+Shift+P");
+    }
+    function ide(parent, titleKey, build) {
+      var d = el("details", "howto-ide");
+      d.appendChild(el("summary", null, t(titleKey)));
+      build(d);
+      parent.appendChild(d);
+    }
+    function para(parent, key) { parent.appendChild(el("p", null, kb(t(key)))); }
     if (st.lunovant_installed) {
-      box.appendChild(el("h4", null, t("g_howto_desktop_t")));
-      box.appendChild(el("p", null, t("g_howto_desktop")));
-      box.appendChild(el("h4", null, t("g_howto_ide_t")));
-      box.appendChild(el("p", null, t("g_howto_ide")));
-      box.appendChild(el("h4", null, t("g_howto_cli_t")));
-      box.appendChild(el("p", null, t("g_howto_cli_default")));
-      box.appendChild(cmdRow("codex"));
-      box.appendChild(el("p", null, t("g_howto_cli_profile")));
-      box.appendChild(cmdRow("codex -p lunovant"));
-      box.appendChild(el("p", null, t("g_howto_cli_model")));
-      box.appendChild(cmdRow("/model"));
+      var cx = el("div", "howto-product");
+      cx.appendChild(el("h4", null, t("g_howto_codex_h")));
+      ide(cx, "g_howto_desktop_t", function (d) { para(d, "g_howto_desktop"); });
+      ide(cx, "g_howto_vscode_t", function (d) { para(d, "g_howto_ide"); });
+      ide(cx, "g_howto_cursor_t", function (d) { para(d, "g_howto_cursor_codex"); para(d, "g_howto_cursor_note"); });
+      ide(cx, "g_howto_jb_t", function (d) { para(d, "g_howto_jb_codex"); d.appendChild(cmdRow("codex")); });
+      if (mac) ide(cx, "g_howto_xcode_t", function (d) { para(d, "g_howto_xcode_codex"); d.appendChild(cmdRow("codex")); });
+      ide(cx, "g_howto_cli_t", function (d) {
+        d.appendChild(el("p", null, t("g_howto_cli_default")));
+        d.appendChild(cmdRow("codex"));
+        d.appendChild(el("p", null, t("g_howto_cli_profile")));
+        d.appendChild(cmdRow("codex -p lunovant"));
+        d.appendChild(el("p", null, t("g_howto_cli_model")));
+        d.appendChild(cmdRow("/model"));
+      });
+      box.appendChild(cx);
     }
     if (st.claude && st.claude.installed) {
-      box.appendChild(el("h4", null, t("g_howto_claude_t")));
-      box.appendChild(el("p", null, t("g_howto_claude_cli")));
-      box.appendChild(cmdRow("claude"));
-      box.appendChild(el("p", null, t("g_howto_claude_profile")));
-      box.appendChild(cmdRow(st.claude.profile_command || "claude --settings ~/.claude/lunovant-settings.json"));
-      box.appendChild(el("p", null, t("g_howto_claude_model")));
-      box.appendChild(cmdRow("/model sonnet"));
-      box.appendChild(el("h4", null, t("g_howto_claude_ide_t")));
-      box.appendChild(el("p", null, t("g_howto_claude_ide")));
-      box.appendChild(el("p", null, "• " + t("g_howto_claude_desktop")));
+      var cc = el("div", "howto-product");
+      cc.appendChild(el("h4", null, t("g_howto_claude_h")));
+      ide(cc, "g_howto_cli_t", function (d) {
+        d.appendChild(el("p", null, t("g_howto_claude_cli")));
+        d.appendChild(cmdRow("claude"));
+        d.appendChild(el("p", null, t("g_howto_claude_profile")));
+        d.appendChild(cmdRow(st.claude.profile_command || "claude --settings ~/.claude/lunovant-settings.json"));
+        d.appendChild(el("p", null, t("g_howto_claude_model")));
+        d.appendChild(cmdRow("/model sonnet"));
+      });
+      ide(cc, "g_howto_vscode_t", function (d) { para(d, "g_howto_claude_ide"); });
+      ide(cc, "g_howto_cursor_t", function (d) { para(d, "g_howto_cursor_claude"); para(d, "g_howto_cursor_note"); });
+      ide(cc, "g_howto_jb_t", function (d) {
+        para(d, "g_howto_jb_claude");
+        if (st.claude.cli_path) { para(d, "g_howto_jb_claude_path"); d.appendChild(cmdRow(st.claude.cli_path)); }
+        else para(d, "g_howto_jb_claude_nopath");
+        para(d, "g_howto_jb_claude_ai");
+      });
+      if (mac) ide(cc, "g_howto_xcode_t", function (d) { para(d, "g_howto_xcode_claude"); d.appendChild(cmdRow("claude")); });
+      cc.appendChild(el("p", null, "• " + t("g_howto_claude_desktop")));
+      box.appendChild(cc);
     }
     box.appendChild(el("h4", null, t("g_howto_notes_t")));
     if (st.lunovant_installed) {

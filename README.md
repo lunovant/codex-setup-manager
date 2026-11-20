@@ -115,6 +115,21 @@ If you already use a personal ChatGPT account with Codex, you can use both side-
   - **Chat titling**: Each new chat thread in the app or IDE makes an extra call to a lightweight model to automatically generate a conversation title (costing just a few hundredths of a 💎).
   - **Check balance**: Check your remaining 💎 balance and plan details anytime at [https://ai.lunovant.tech/dashboard](https://ai.lunovant.tech/dashboard).
 
+### Using it in your IDE
+
+Shortcuts shown for macOS; use `Ctrl`/`Alt` instead of `⌘`/`⌥` on Windows and Linux.
+
+- **Codex**:
+  - **VS Code**: open the Codex panel as described above.
+  - **Cursor**: install the "Codex" extension (publisher OpenAI), then `⌘⇧P` → **Open Codex Sidebar** (right sidebar; `⌥⌘B` shows/hides it). Cursor's own chat / "New Agent" box is Cursor's AI and does not use your Lunovant 💎. If Cursor opens its "Agents" window, click **IDE ↗** to get the editor. Reload Window after switching mode.
+  - **JetBrains** (IntelliJ IDEA, Android Studio, PyCharm, WebStorm…): the built-in AI Assistant agents do not use Lunovant. Open the IDE's Terminal tab in your project and run `codex`.
+  - **Xcode**: the built-in coding agents are not supported yet. Open Terminal in the project folder and run `codex`.
+- **Claude Code**:
+  - **VS Code**: install the Claude Code extension; nothing else to set up.
+  - **Cursor**: install the "Claude Code" extension (publisher Anthropic); open it from the ✻ icon at the top right of the editor or "✻ Claude Code" in the status bar. Same caveat about Cursor's own chat / Agents window; Reload Window after switching mode.
+  - **JetBrains**: Settings → Plugins → Marketplace → install "Claude Code [Beta]", restart the IDE, then click the Claude icon in the toolbar. If it says "Cannot launch Claude Code", go to Settings → Tools → Claude Code [Beta] → "Claude command" and paste the output of `which claude` (macOS/Linux) or `where claude` (Windows); the app's "How to use" box shows this path too. The AI Assistant's built-in "Claude Agent" does not use Lunovant.
+  - **Xcode**: not supported yet; run `claude` in Terminal in the project folder.
+
 ### What it does for Codex
 
 - Adds a Lunovant provider and a default model to `$CODEX_HOME/config.toml` (keeps your other settings and comments).
