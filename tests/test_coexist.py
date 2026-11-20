@@ -224,6 +224,18 @@ def test_mode_picks_up_user_changes_in_personal_mode(svc):
     assert _top() == {"model": "b", "model_provider": "openai"}
 
 
+def test_mode_round_trip_keeps_model_picked_in_codex(svc):
+    _write_cfg('model = "a"\nmodel_provider = "openai"\n')
+    svc.one_click_setup(KEY)
+    # the Codex picker edits config.toml directly, bypassing change_model
+    _cfg().write_text(_cfg().read_text().replace('model = "gpt-6.1-sol"', 'model = "gpt-6-luna"'))
+    svc.set_mode("personal")
+    assert _top() == {"model": "a", "model_provider": "openai"}
+    assert tomllib.loads(_profile().read_text())["model"] == "gpt-6-luna"
+    svc.set_mode("lunovant")
+    assert _top() == {"model": "gpt-6-luna", "model_provider": "lunovant"}
+
+
 def test_set_mode_requires_setup_and_valid_mode(svc):
     with pytest.raises(CodexSetupError):
         svc.set_mode("personal")
