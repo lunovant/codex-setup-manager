@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
+
+import pytest
 
 from codex_setup.core import claude_config
 from codex_setup.core.claude_config import find_claude_cli
@@ -51,6 +54,7 @@ def test_fallback_order(monkeypatch, tmp_path):
     assert find_claude_cli("linux", tmp_path, {}) == str(first)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no execute bit; os.access(X_OK) is always true")
 def test_non_executable_and_dirs_ignored(monkeypatch, tmp_path):
     _no_which(monkeypatch, tmp=tmp_path)
     _exe(tmp_path / ".local" / "bin" / "claude", 0o644)
