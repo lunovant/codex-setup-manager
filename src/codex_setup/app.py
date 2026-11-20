@@ -1076,9 +1076,16 @@ class SetupService:
         chosen: list[str] = []
 
         def mutate(doc: Any, state: AppState, own: ConfigOwnership) -> None:
-            if LUNOVANT.id not in codex_config.get_status(doc).provider_ids:
+            st = codex_config.get_status(doc)
+            if LUNOVANT.id not in st.provider_ids:
                 raise CodexSetupError("Lunovant is not set up yet. Run the setup first.")
             prof = state.profiles.get(LUNOVANT.id)
+            if prof is not None and st.model_provider == LUNOVANT.id and st.model:
+                # the Codex model picker writes the top-level model directly: remember it
+                try:
+                    prof.model = validate_model_name(st.model)
+                except ValidationError:
+                    pass
             model = (prof.model if prof else None) or (state.one_click or {}).get(
                 "default_model"
             ) or DEFAULT_MODEL

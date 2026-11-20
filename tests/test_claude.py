@@ -545,7 +545,7 @@ def test_cli_both_lines_and_keep_personal(svc, monkeypatch, capsys):
 def test_cli_help_and_version():
     assert cli.build_parser().description.startswith("Lunovant Setup")
     from codex_setup import __version__
-    assert __version__ == "0.4.2"
+    assert __version__ == "0.4.3"
     from codex_setup.gui.app import TITLE
     assert TITLE == "Lunovant Setup"
 
