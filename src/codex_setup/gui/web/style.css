@@ -82,6 +82,9 @@ button.link { background: transparent; border: none; color: var(--accent); text-
 .howto summary { cursor: pointer; font-weight: 600; }
 .howto h4 { margin: 12px 0 4px; }
 .howto p { margin: 4px 0; }
+.howto-ide { margin: 4px 0 4px 12px; padding: 4px 8px; border-left: 2px solid var(--border); }
+.howto-ide summary { font-weight: 500; }
+.howto-ide .cmd { margin: 4px 0; }
 .cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
 .cmd code { background: var(--code); border-radius: 4px; padding: 2px 6px; font-family: ui-monospace, Menlo, Consolas, monospace; }
 .cmd button { padding: 1px 8px; font-size: 12px; }

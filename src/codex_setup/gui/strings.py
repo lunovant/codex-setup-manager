@@ -367,3 +367,41 @@ VI.update({
     "g_un_main_partial": "Đã gỡ, nhưng có mục cần bạn chú ý:",
     "g_un_main_confirm": "Gỡ Lunovant và xoá key đã lưu? Các thay đổi sẽ là:",
 })
+
+EN.update({
+    "g_howto_codex_h": "Codex",
+    "g_howto_claude_h": "Claude Code",
+    "g_howto_vscode_t": "VS Code",
+    "g_howto_cursor_t": "Cursor",
+    "g_howto_jb_t": "JetBrains (IntelliJ IDEA, Android Studio, PyCharm, WebStorm…)",
+    "g_howto_xcode_t": "Xcode",
+    "g_howto_cursor_codex": "Install the \"Codex\" extension (publisher OpenAI) from the Extensions view. Open it with ⌘⇧P → \"Open Codex Sidebar\" (it lives in the right sidebar; ⌥⌘B shows or hides that sidebar).",
+    "g_howto_cursor_claude": "Install the \"Claude Code\" extension (publisher Anthropic) from the Extensions view. Open it from the ✻ icon at the top right of the editor, or \"✻ Claude Code\" in the status bar.",
+    "g_howto_cursor_note": "Cursor's own chat / \"New Agent\" box is Cursor's AI and does not use your Lunovant 💎. If Cursor opens its \"Agents\" window, click \"IDE ↗\" to get the editor. Reload Window after switching mode.",
+    "g_howto_jb_codex": "The built-in AI Assistant agents do not use Lunovant. Open the IDE's Terminal tab in your project and run:",
+    "g_howto_jb_claude": "Open Settings → Plugins → Marketplace, install \"Claude Code [Beta]\", restart the IDE, then click the Claude icon in the toolbar.",
+    "g_howto_jb_claude_path": "If it says \"Cannot launch Claude Code\": Settings → Tools → Claude Code [Beta] → \"Claude command\", and paste this path:",
+    "g_howto_jb_claude_nopath": "If it says \"Cannot launch Claude Code\": run `which claude` (macOS/Linux) or `where claude` (Windows) in a terminal, then paste the result into Settings → Tools → Claude Code [Beta] → \"Claude command\".",
+    "g_howto_jb_claude_ai": "The AI Assistant's built-in \"Claude Agent\" does not use Lunovant.",
+    "g_howto_xcode_codex": "Xcode's built-in coding agents are not supported yet. Open Terminal in the project folder and run:",
+    "g_howto_xcode_claude": "Xcode's built-in coding agents are not supported yet. Open Terminal in the project folder and run:",
+})
+
+VI.update({
+    "g_howto_codex_h": "Codex",
+    "g_howto_claude_h": "Claude Code",
+    "g_howto_vscode_t": "VS Code",
+    "g_howto_cursor_t": "Cursor",
+    "g_howto_jb_t": "JetBrains (IntelliJ IDEA, Android Studio, PyCharm, WebStorm…)",
+    "g_howto_xcode_t": "Xcode",
+    "g_howto_cursor_codex": "Cài extension \"Codex\" (publisher OpenAI) trong mục Extensions. Mở bằng ⌘⇧P → \"Open Codex Sidebar\" (nằm ở thanh bên phải; ⌥⌘B để hiện hoặc ẩn thanh bên đó).",
+    "g_howto_cursor_claude": "Cài extension \"Claude Code\" (publisher Anthropic) trong mục Extensions. Mở bằng biểu tượng ✻ ở góc trên bên phải của editor, hoặc \"✻ Claude Code\" ở thanh trạng thái.",
+    "g_howto_cursor_note": "Khung chat / \"New Agent\" riêng của Cursor là AI của Cursor và không dùng 💎 Lunovant của bạn. Nếu Cursor mở cửa sổ \"Agents\", hãy bấm \"IDE ↗\" để quay lại editor. Reload Window sau khi đổi chế độ.",
+    "g_howto_jb_codex": "Các agent có sẵn trong AI Assistant không dùng Lunovant. Hãy mở tab Terminal của IDE trong dự án rồi chạy:",
+    "g_howto_jb_claude": "Vào Settings → Plugins → Marketplace, cài \"Claude Code [Beta]\", khởi động lại IDE, rồi bấm biểu tượng Claude trên thanh công cụ.",
+    "g_howto_jb_claude_path": "Nếu báo \"Cannot launch Claude Code\": vào Settings → Tools → Claude Code [Beta] → \"Claude command\" và dán đường dẫn này:",
+    "g_howto_jb_claude_nopath": "Nếu báo \"Cannot launch Claude Code\": chạy `which claude` (macOS/Linux) hoặc `where claude` (Windows) trong terminal, rồi dán kết quả vào Settings → Tools → Claude Code [Beta] → \"Claude command\".",
+    "g_howto_jb_claude_ai": "\"Claude Agent\" tích hợp sẵn trong AI Assistant không dùng Lunovant.",
+    "g_howto_xcode_codex": "Các coding agent tích hợp sẵn của Xcode chưa được hỗ trợ. Hãy mở Terminal tại thư mục dự án rồi chạy:",
+    "g_howto_xcode_claude": "Các coding agent tích hợp sẵn của Xcode chưa được hỗ trợ. Hãy mở Terminal tại thư mục dự án rồi chạy:",
+})

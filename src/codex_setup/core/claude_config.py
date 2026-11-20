@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -267,3 +268,41 @@ def write_private(path: Path, text: str) -> None:
                 os.unlink(tmp_name)
             except OSError:
                 pass
+
+
+_SYSTEM_CLAUDE_PATHS = (Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude"))
+
+
+def find_claude_cli(system: str, home: Path, env: Mapping[str, str]) -> str | None:
+    """Locate the ``claude`` executable.
+
+    A GUI app started from Finder has a minimal PATH, so fall back to the usual install dirs.
+    Returns ``shutil.which("claude")`` when found, else the first existing executable file.
+    """
+    found = shutil.which("claude")
+    if found:
+        return found
+    if system == "windows":
+        userprofile = env.get("USERPROFILE")
+        appdata = env.get("APPDATA")
+        candidates = []
+        if userprofile:
+            candidates.append(Path(userprofile) / ".local" / "bin" / "claude.exe")
+        if appdata:
+            candidates.append(Path(appdata) / "npm" / "claude.cmd")
+    else:
+        candidates = [
+            home / ".local" / "bin" / "claude",
+            home / ".claude" / "local" / "claude",
+            *_SYSTEM_CLAUDE_PATHS[:1],
+            *_SYSTEM_CLAUDE_PATHS[1:],
+            home / ".npm-global" / "bin" / "claude",
+            home / ".bun" / "bin" / "claude",
+        ]
+    for c in candidates:
+        try:
+            if c.is_file() and (system == "windows" or os.access(c, os.X_OK)):
+                return str(c)
+        except OSError:
+            continue
+    return None

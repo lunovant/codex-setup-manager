@@ -115,6 +115,21 @@ Nếu bạn đã đăng nhập tài khoản ChatGPT cá nhân trong Codex từ t
   - **Tự động đặt tên chat**: Mỗi lần tạo chat mới trong app hoặc IDE, Codex sẽ gọi một model nhỏ để tự động tạo tiêu đề cuộc trò chuyện (chỉ tốn khoảng vài phần trăm 💎).
   - **Kiểm tra số dư**: Bạn có thể tra cứu số dư 💎 và thông tin gói dịch vụ bất kỳ lúc nào tại [https://ai.lunovant.tech/dashboard](https://ai.lunovant.tech/dashboard).
 
+### Dùng trong IDE
+
+Phím tắt ghi theo macOS; trên Windows và Linux dùng `Ctrl`/`Alt` thay cho `⌘`/`⌥`.
+
+- **Codex**:
+  - **VS Code**: mở khung Codex như hướng dẫn ở trên.
+  - **Cursor**: cài extension "Codex" (publisher OpenAI), rồi `⌘⇧P` → **Open Codex Sidebar** (thanh bên phải; `⌥⌘B` để hiện/ẩn). Khung chat / "New Agent" riêng của Cursor là AI của Cursor và không dùng 💎 Lunovant. Nếu Cursor mở cửa sổ "Agents", bấm **IDE ↗** để quay lại editor. Reload Window sau khi đổi chế độ.
+  - **JetBrains** (IntelliJ IDEA, Android Studio, PyCharm, WebStorm…): các agent trong AI Assistant không dùng Lunovant. Mở tab Terminal của IDE trong dự án và chạy `codex`.
+  - **Xcode**: các coding agent tích hợp sẵn chưa được hỗ trợ. Mở Terminal tại thư mục dự án và chạy `codex`.
+- **Claude Code**:
+  - **VS Code**: cài extension Claude Code; không cần cấu hình thêm.
+  - **Cursor**: cài extension "Claude Code" (publisher Anthropic); mở bằng biểu tượng ✻ ở góc trên bên phải editor hoặc "✻ Claude Code" ở thanh trạng thái. Lưu ý tương tự về khung chat / cửa sổ Agents của Cursor; Reload Window sau khi đổi chế độ.
+  - **JetBrains**: Settings → Plugins → Marketplace → cài "Claude Code [Beta]", khởi động lại IDE, rồi bấm biểu tượng Claude trên thanh công cụ. Nếu báo "Cannot launch Claude Code", vào Settings → Tools → Claude Code [Beta] → "Claude command" và dán kết quả của `which claude` (macOS/Linux) hoặc `where claude` (Windows); khung "Cách dùng" trong ứng dụng cũng hiện sẵn đường dẫn này. "Claude Agent" tích hợp sẵn trong AI Assistant không dùng Lunovant.
+  - **Xcode**: chưa hỗ trợ; chạy `claude` trong Terminal tại thư mục dự án.
+
 ### Công cụ làm gì cho Codex
 
 - Thêm nhà cung cấp Lunovant và model mặc định vào `$CODEX_HOME/config.toml` (giữ nguyên các cấu hình khác của bạn).

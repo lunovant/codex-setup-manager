@@ -18,7 +18,7 @@ from typing import Any
 from codex_setup import __version__
 from codex_setup.app import MODES, CatalogRefresh, SetupService, normalize_key, suggest_v1
 from codex_setup.core.config_store import SaveResult
-from codex_setup.core import claude_config, codex_config
+from codex_setup.core import claude_config, codex_config, paths
 from codex_setup.core.state import load_state, save_state
 from codex_setup.diagnostics import model_probe
 from codex_setup.core.errors import CodexSetupError, ValidationError
@@ -161,6 +161,12 @@ class GuiApi:
 
         return self._guard(run)
 
+    def _find_claude(self) -> str | None:
+        svc = self._svc
+        system = svc.platform.system
+        home = paths._home(svc.env, system)
+        return claude_config.find_claude_cli(system, home, svc.env)
+
     def _claude_status(self) -> dict[str, Any]:
         svc = self._svc
         installed = svc.claude_installed()
@@ -169,7 +175,7 @@ class GuiApi:
             "installed": installed,
             "mode": mode,
             "login": svc.claude_login_present(),
-            "cli_path": shutil.which("claude"),
+            "cli_path": self._find_claude(),
             "terminal": launcher.terminal_supported(svc.platform.system),
             "command": svc.claude_launch_command(mode),
             "profile_command": svc.claude_profile_command(),
